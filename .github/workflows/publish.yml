@@ -25,57 +25,6 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install build dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake zlib1g-dev libssl-dev liblz4-dev libzstd-dev libbrotli-dev
-
-      - name: Install build dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install cmake zlib openssl lz4 zstd brotli
-
-      - name: Install build dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-
-      - name: Setup vcpkg (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "C:\vcpkg")) {
-            git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-          }
-          & C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-          $env:VCPKG_ROOT = "C:\vcpkg"
-          & C:\vcpkg\vcpkg.exe integrate install
-          & C:\vcpkg\vcpkg.exe install zlib:x64-windows openssl:x64-windows lz4:x64-windows zstd:x64-windows brotli:x64-windows --triplet x64-windows
-
-      - name: Build btoon-core (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          cd core
-          mkdir -p build_shared
-          cd build_shared
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install
-          cmake --build . --config Release -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
-          cmake --install .
-          cd ../..
-
-      - name: Build btoon-core (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cd core
-          New-Item -ItemType Directory -Force -Path build_shared
-          cd build_shared
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_INSTALL_PREFIX=install
-          cmake --build . --config Release
-          cmake --install .
-          cd ../..
-
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.16.5
         env:
@@ -84,7 +33,24 @@ jobs:
           CIBW_ARCHS_MACOS: "x86_64 arm64"
           CIBW_ARCHS_LINUX: "x86_64"
           CIBW_ARCHS_WINDOWS: "AMD64"
-          CIBW_BEFORE_BUILD_LINUX: "yum install -y zlib-devel openssl-devel lz4-devel libzstd-devel brotli-devel || apt-get update && apt-get install -y zlib1g-dev libssl-dev liblz4-dev libzstd-dev libbrotli-dev"
+          # Build btoon-core once before building all Python wheels
+          CIBW_BEFORE_ALL_LINUX: >
+            yum install -y zlib-devel openssl-devel cmake3 &&
+            cd core &&
+            mkdir -p build_shared && cd build_shared &&
+            cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install &&
+            make -j$(nproc) && make install
+          CIBW_BEFORE_ALL_MACOS: >
+            cd core &&
+            mkdir -p build_shared && cd build_shared &&
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install &&
+            make -j$(sysctl -n hw.ncpu) && make install
+          CIBW_BEFORE_ALL_WINDOWS: >
+            choco install cmake --installargs ADD_CMAKE_TO_PATH=System -y &&
+            cd core &&
+            mkdir build_shared && cd build_shared &&
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install &&
+            cmake --build . --config Release && cmake --install .
           CIBW_TEST_COMMAND: "python -c \"import btoon; data = {'test': True}; enc = btoon.encode(data); dec = btoon.decode(enc); assert dec == data; print('✅ Test passed')\""
           CIBW_BUILD_VERBOSITY: 1
 

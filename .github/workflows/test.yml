@@ -31,29 +31,17 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake zlib1g-dev libssl-dev liblz4-dev libzstd-dev libbrotli-dev
+          sudo apt-get install -y build-essential cmake zlib1g-dev libssl-dev
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cmake zlib openssl lz4 zstd brotli
+          brew install cmake
 
       - name: Install build dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-
-      - name: Setup vcpkg (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "C:\vcpkg")) {
-            git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-          }
-          & C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-          $env:VCPKG_ROOT = "C:\vcpkg"
-          & C:\vcpkg\vcpkg.exe integrate install
-          & C:\vcpkg\vcpkg.exe install zlib:x64-windows openssl:x64-windows lz4:x64-windows zstd:x64-windows brotli:x64-windows --triplet x64-windows
 
       - name: Build btoon-core (Linux/macOS)
         if: runner.os != 'Windows'
@@ -73,7 +61,7 @@ jobs:
           cd core
           New-Item -ItemType Directory -Force -Path build_shared
           cd build_shared
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_INSTALL_PREFIX=install
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install
           cmake --build . --config Release
           cmake --install .
           cd ../..
