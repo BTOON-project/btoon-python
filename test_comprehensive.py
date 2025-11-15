@@ -203,9 +203,9 @@ def test_error_handling():
     """Test error handling for invalid inputs."""
     print("Testing error handling...", end=" ")
 
-    # Test decoding invalid data
+    # Test decoding invalid data (0xc1 is a reserved/never-used marker in MessagePack)
     try:
-        btoon.decode(b"\xff\xff\xff")
+        btoon.decode(b"\xc1\x00\x00")
         assert False, "Should have raised an error for invalid data"
     except ValueError:
         pass  # Expected

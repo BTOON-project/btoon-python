@@ -1,37 +1,47 @@
 # Include source files
 include btoon_python.cpp
 include pyproject.toml
+include setup.py
 include LICENSE
 include README.md
+
+# Include test files
+include test_comprehensive.py
+include test_quick.py
 
 # Include package files
 recursive-include btoon *.py *.pyi py.typed
 
-# Include btoon-core headers and library
-recursive-include ../btoon-core/include *.h *.hpp
-include ../btoon-core/build/libbtoon_core.a
+# Include btoon-core submodule (source files needed for building)
+graft core/include
+graft core/src
+include core/CMakeLists.txt
+include core/LICENSE
+include core/README.md
 
-# Include examples but not in wheel
+# Exclude unnecessary core files
+prune core/tests
+prune core/tools
+prune core/examples
+prune core/docs
+prune core/scripts
+prune core/.git
+prune core/.github
+prune core/build
+prune core/build_shared
+
+# Include examples
 recursive-include examples *.py
-prune examples
 
-# Include tests but not in wheel
-recursive-include tests *.py
-prune tests
-
-# Exclude unnecessary files
+# Exclude compiled files
 global-exclude __pycache__
 global-exclude *.py[co]
 global-exclude .git*
 global-exclude .DS_Store
 global-exclude *.swp
 global-exclude *~
-
-# Exclude the core submodule (except what we need)
-prune core/src
-prune core/tests
-prune core/tools
-prune core/docs
-prune core/scripts
-prune core/.git
-prune core/.github
+global-exclude *.so
+global-exclude *.dylib
+global-exclude *.dll
+global-exclude *.a
+global-exclude *.lib
