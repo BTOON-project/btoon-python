@@ -25,6 +25,25 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Verify submodule checkout
+        run: |
+          ls -la core/
+          test -f core/CMakeLists.txt || (echo "ERROR: core/CMakeLists.txt not found" && exit 1)
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake zlib openssl
+          which cmake
+          cmake --version
+
+      - name: Install build dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          where cmake
+          cmake --version
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.16.5
         env:

@@ -22,6 +22,11 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Verify submodule checkout
+        run: |
+          ls -la core/
+          test -f core/CMakeLists.txt || (echo "ERROR: core/CMakeLists.txt not found" && exit 1)
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -37,11 +42,15 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install cmake
+          which cmake
+          cmake --version
 
       - name: Install build dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          where cmake
+          cmake --version
 
       - name: Build btoon-core (Linux/macOS)
         if: runner.os != 'Windows'
