@@ -54,7 +54,11 @@ jobs:
           CIBW_ARCHS_WINDOWS: "AMD64"
           # Build btoon-core once before building all Python wheels
           CIBW_BEFORE_ALL_LINUX: >
-            yum install -y zlib-devel openssl-devel cmake3 &&
+            yum install -y zlib-devel openssl-devel cmake3 git &&
+            if [ ! -d core/.git ]; then
+              rm -rf core &&
+              git clone https://github.com/BTOON-project/btoon-core.git core;
+            fi &&
             cd core &&
             mkdir -p build_shared && cd build_shared &&
             cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install &&

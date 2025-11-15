@@ -13,11 +13,13 @@ include test_quick.py
 recursive-include btoon *.py *.pyi py.typed
 
 # Include btoon-core submodule (source files needed for building)
-graft core/include
-graft core/src
+# Note: If core submodule is empty, it will be cloned during build
+recursive-include core/include *.h *.hpp
+recursive-include core/src *.cpp *.h *.hpp
 include core/CMakeLists.txt
 include core/LICENSE
 include core/README.md
+include core/.gitmodules
 
 # Exclude unnecessary core files
 prune core/tests
