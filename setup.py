@@ -10,13 +10,29 @@ btoon_core_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", 
 btoon_include = os.environ.get("BTOON_INCLUDE", os.path.join(btoon_core_path, "include"))
 btoon_lib = os.environ.get("BTOON_LIB", os.path.join(btoon_core_path, "build"))
 
+# Set up runtime library search path
+extra_link_args = []
+if sys.platform == 'darwin':
+    # macOS: embed rpath so dylib can be found at runtime
+    extra_link_args.extend([
+        f'-Wl,-rpath,{btoon_lib}',
+        f'-Wl,-rpath,@loader_path/../btoon-core/build',
+    ])
+elif sys.platform.startswith('linux'):
+    # Linux: use $ORIGIN for relative rpath
+    extra_link_args.extend([
+        f'-Wl,-rpath,{btoon_lib}',
+        '-Wl,-rpath,$ORIGIN/../btoon-core/build',
+    ])
+
 ext_modules = [
     Pybind11Extension(
-        "btoon",
+        "btoon._btoon",
         ["btoon_python.cpp"],
         include_dirs=[btoon_include],
         library_dirs=[btoon_lib],
         libraries=["btoon_core", "z"],
+        extra_link_args=extra_link_args,
         cxx_std=20,
         define_macros=[("VERSION_INFO", __version__)],
     ),
@@ -34,6 +50,7 @@ setup(
     description="Python bindings for BTOON: Binary TOON serialization format",
     long_description=long_description,
     long_description_content_type="text/markdown",
+    packages=["btoon"],
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
