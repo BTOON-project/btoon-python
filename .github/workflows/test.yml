@@ -22,10 +22,18 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Verify submodule checkout
+      - name: Verify submodule checkout (Unix)
+        if: runner.os != 'Windows'
         run: |
           ls -la core/
           test -f core/CMakeLists.txt || (echo "ERROR: core/CMakeLists.txt not found" && exit 1)
+
+      - name: Verify submodule checkout (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          dir core\
+          if not exist core\CMakeLists.txt (echo ERROR: core\CMakeLists.txt not found && exit 1)
 
       - name: Setup Python
         uses: actions/setup-python@v5
