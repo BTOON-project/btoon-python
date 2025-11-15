@@ -120,6 +120,9 @@ def test_unicode_strings():
     print("✅ PASSED")
     return True
 
+    print("✅ PASSED")
+    return True
+
 
 def test_nested_structures():
     """Test deeply nested data structures."""
