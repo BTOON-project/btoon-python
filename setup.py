@@ -25,13 +25,27 @@ elif sys.platform.startswith('linux'):
         '-Wl,-rpath,$ORIGIN/../btoon-core/build',
     ])
 
+# Try to find optional compression libraries
+optional_libs = []
+import subprocess
+for lib in ["lz4", "zstd", "brotlienc", "brotlidec"]:
+    try:
+        result = subprocess.run(["pkg-config", "--exists", f"lib{lib}"],
+                               capture_output=True, timeout=5)
+        if result.returncode == 0:
+            optional_libs.append(lib)
+    except:
+        pass
+
+libraries = ["btoon_core", "z"] + optional_libs
+
 ext_modules = [
     Pybind11Extension(
         "btoon._btoon",
         ["btoon_python.cpp"],
         include_dirs=[btoon_include],
         library_dirs=[btoon_lib],
-        libraries=["btoon_core", "z"],
+        libraries=libraries,
         extra_link_args=extra_link_args,
         cxx_std=20,
         define_macros=[("VERSION_INFO", __version__)],
