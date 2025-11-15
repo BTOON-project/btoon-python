@@ -64,16 +64,24 @@ jobs:
             cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install &&
             make -j$(nproc) && make install
           CIBW_BEFORE_ALL_MACOS: >
+            if [ ! -d core/.git ]; then
+              rm -rf core &&
+              git clone https://github.com/BTOON-project/btoon-core.git core;
+            fi &&
             cd core &&
             mkdir -p build_shared && cd build_shared &&
             cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install &&
             make -j$(sysctl -n hw.ncpu) && make install
-          CIBW_BEFORE_ALL_WINDOWS: >
-            choco install cmake --installargs ADD_CMAKE_TO_PATH=System -y &&
-            cd core &&
-            mkdir build_shared && cd build_shared &&
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install &&
-            cmake --build . --config Release && cmake --install .
+          CIBW_BEFORE_ALL_WINDOWS: |
+            choco install cmake git --installargs ADD_CMAKE_TO_PATH=System -y
+            if not exist core\.git rmdir /s /q core 2>nul
+            if not exist core git clone https://github.com/BTOON-project/btoon-core.git core
+            cd core
+            mkdir build_shared
+            cd build_shared
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install
+            cmake --build . --config Release
+            cmake --install .
           CIBW_TEST_COMMAND: "python -c \"import btoon; data = {'test': True}; enc = btoon.encode(data); dec = btoon.decode(enc); assert dec == data; print('✅ Test passed')\""
           CIBW_BUILD_VERBOSITY: 1
 
