@@ -1,0 +1,3 @@
+[submodule "core"]
+	path = core
+	url = https://github.com/BTOON-project/btoon-core.git
