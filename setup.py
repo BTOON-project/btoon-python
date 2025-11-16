@@ -8,7 +8,20 @@ __version__ = "0.0.1"
 # Find btoon-core installation
 btoon_core_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "core"))
 btoon_include = os.path.join(btoon_core_path, "include")
-btoon_lib = os.path.join(btoon_core_path, "build")
+
+# On Windows, MSVC puts libraries in build/Release or build/Debug
+if sys.platform == 'win32':
+    btoon_lib_release = os.path.join(btoon_core_path, "build", "Release")
+    btoon_lib_debug = os.path.join(btoon_core_path, "build", "Debug")
+    # Prefer Release, fall back to Debug, then build
+    if os.path.exists(btoon_lib_release):
+        btoon_lib = btoon_lib_release
+    elif os.path.exists(btoon_lib_debug):
+        btoon_lib = btoon_lib_debug
+    else:
+        btoon_lib = os.path.join(btoon_core_path, "build")
+else:
+    btoon_lib = os.path.join(btoon_core_path, "build")
 
 # Set up runtime library search path
 extra_link_args = []
@@ -50,6 +63,13 @@ for lib in ["lz4", "zstd", "brotlienc", "brotlidec"]:
         pass
 
 libraries = ["btoon_core", "z"] + optional_libs
+
+# Add vcpkg paths for Windows
+if sys.platform == 'win32':
+    vcpkg_include = "C:/vcpkg/installed/x64-windows/include"
+    vcpkg_lib = "C:/vcpkg/installed/x64-windows/lib"
+    if os.path.exists(vcpkg_include):
+        library_dirs_from_pkg_config.insert(0, vcpkg_lib)
 
 ext_modules = [
     Pybind11Extension(

@@ -73,14 +73,12 @@ jobs:
             echo "Entering core directory..."
             cd core || exit 1
             echo "Creating build directory..."
-            mkdir -p build_shared
-            cd build_shared || exit 1
+            mkdir -p build
+            cd build || exit 1
             echo "Running cmake..."
-            cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install || exit 1
+            cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON || exit 1
             echo "Building..."
             make -j$(nproc) || exit 1
-            echo "Installing..."
-            make install || exit 1
           CIBW_BEFORE_ALL_MACOS: |
             echo "Checking for core directory..."
             if [ ! -d core/.git ]; then
@@ -91,15 +89,13 @@ jobs:
             echo "Entering core directory..."
             cd core || exit 1
             echo "Creating build directory..."
-            mkdir -p build_shared
-            cd build_shared || exit 1
+            mkdir -p build
+            cd build || exit 1
             echo "Running cmake..."
             export MACOSX_DEPLOYMENT_TARGET=10.15
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install || exit 1
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON || exit 1
             echo "Building..."
             make -j$(sysctl -n hw.ncpu) || exit 1
-            echo "Installing..."
-            make install || exit 1
           CIBW_BEFORE_ALL_WINDOWS: |
             echo Installing dependencies
             choco install cmake git --installargs ADD_CMAKE_TO_PATH=System -y
@@ -107,14 +103,12 @@ jobs:
             if not exist core\.git rmdir /s /q core 2>nul
             if not exist core git clone https://github.com/BTOON-project/btoon-core.git core
             cd core
-            mkdir build_shared
-            cd build_shared
+            mkdir build
+            cd build
             echo Running cmake
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=install
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
             echo Building
             cmake --build . --config Release
-            echo Installing
-            cmake --install .
           CIBW_TEST_COMMAND: "python -c \"import btoon; data = {'test': True}; enc = btoon.encode(data); dec = btoon.decode(enc); assert dec == data; print('✅ Test passed')\""
           CIBW_BUILD_VERBOSITY: 1
 
