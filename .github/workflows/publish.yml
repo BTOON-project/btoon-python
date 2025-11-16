@@ -25,6 +25,13 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Ensure core submodule is properly checked out
+        shell: bash
+        run: |
+          git submodule update --init --recursive --force
+          ls -la core/ || echo "core directory not found"
+          test -f core/CMakeLists.txt || (echo "ERROR: core/CMakeLists.txt not found" && exit 1)
+
       - name: Verify submodule checkout (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -56,6 +63,8 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.16.5
         env:
+          # Ensure submodule content is included
+          CIBW_BUILD_FRONTEND: "build"
           CIBW_BUILD: cp38-* cp39-* cp310-* cp311-* cp312-*
           CIBW_SKIP: "*-musllinux_* *-manylinux_i686 *-manylinux_2_17*"
           CIBW_ARCHS_MACOS: "x86_64 arm64"
@@ -64,62 +73,72 @@ jobs:
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
           # Build btoon-core once before building all Python wheels
           CIBW_BEFORE_ALL_LINUX: |
+            set -e
             echo "Installing dependencies..."
-            yum install -y zlib-devel openssl-devel cmake3 make gcc gcc-c++ git || exit 1
+            yum install -y zlib-devel openssl-devel cmake3 make gcc gcc-c++ git
             echo "Current directory: $(pwd)"
             ls -la
             echo "Checking for core directory..."
-            if [ ! -d core ] || [ ! -f core/CMakeLists.txt ]; then
-              echo "Core submodule not found or incomplete, cloning..."
+            if [ ! -f core/CMakeLists.txt ] || [ ! -d core/src ]; then
+              echo "Core submodule incomplete or missing, cloning fresh copy..."
               rm -rf core
-              git clone --depth 1 https://github.com/BTOON-project/btoon-core.git core || exit 1
+              git clone --depth 1 --branch main https://github.com/BTOON-project/btoon-core.git core
             fi
             echo "Core directory contents:"
             ls -la core/
-            echo "Entering core directory..."
-            cd core || exit 1
-            echo "Creating build directory..."
+            test -f core/CMakeLists.txt || (echo "ERROR: core/CMakeLists.txt still missing!" && exit 1)
+            echo "Building btoon-core..."
+            cd core
             mkdir -p build
-            cd build || exit 1
-            echo "Running cmake..."
-            cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON || exit 1
-            echo "Building..."
-            make -j$(nproc) || exit 1
+            cd build
+            cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            make -j$(nproc)
+            echo "btoon-core build complete"
           CIBW_BEFORE_ALL_MACOS: |
+            set -e
             echo "Current directory: $(pwd)"
             ls -la
             echo "Checking for core directory..."
-            if [ ! -d core ] || [ ! -f core/CMakeLists.txt ]; then
-              echo "Core submodule not found or incomplete, cloning..."
+            if [ ! -f core/CMakeLists.txt ] || [ ! -d core/src ]; then
+              echo "Core submodule incomplete or missing, cloning fresh copy..."
               rm -rf core
-              git clone --depth 1 https://github.com/BTOON-project/btoon-core.git core || exit 1
+              git clone --depth 1 --branch main https://github.com/BTOON-project/btoon-core.git core
             fi
             echo "Core directory contents:"
             ls -la core/
-            echo "Entering core directory..."
-            cd core || exit 1
-            echo "Creating build directory..."
-            mkdir -p build
-            cd build || exit 1
-            echo "Running cmake..."
+            test -f core/CMakeLists.txt || (echo "ERROR: core/CMakeLists.txt still missing!" && exit 1)
+            echo "Building btoon-core..."
             export MACOSX_DEPLOYMENT_TARGET=10.15
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON || exit 1
-            echo "Building..."
-            make -j$(sysctl -n hw.ncpu) || exit 1
+            cd core
+            mkdir -p build
+            cd build
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            make -j$(sysctl -n hw.ncpu)
+            echo "btoon-core build complete"
           CIBW_BEFORE_ALL_WINDOWS: |
             echo Installing dependencies
             choco install cmake git --installargs ADD_CMAKE_TO_PATH=System -y
             vcpkg install zlib:x64-windows openssl:x64-windows
+            echo Current directory
+            cd
+            dir
             echo Checking for core directory
-            if not exist core\.git rmdir /s /q core 2>nul
-            if not exist core git clone https://github.com/BTOON-project/btoon-core.git core
+            if not exist core\CMakeLists.txt (
+              echo Core submodule incomplete or missing, cloning fresh copy
+              rmdir /s /q core 2>nul
+              git clone --depth 1 --branch main https://github.com/BTOON-project/btoon-core.git core
+            )
+            if not exist core\CMakeLists.txt (
+              echo ERROR: core\CMakeLists.txt still missing!
+              exit /b 1
+            )
+            echo Building btoon-core
             cd core
-            mkdir build
+            mkdir build 2>nul
             cd build
-            echo Running cmake
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
-            echo Building
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
             cmake --build . --config Release
+            echo btoon-core build complete
           CIBW_TEST_COMMAND: "python -c \"import btoon; data = {'test': True}; enc = btoon.encode(data); dec = btoon.decode(enc); assert dec == data; print('✅ Test passed')\""
           CIBW_BUILD_VERBOSITY: 1
 
