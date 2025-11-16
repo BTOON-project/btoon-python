@@ -74,7 +74,7 @@ if sys.platform == 'win32':
 ext_modules = [
     Pybind11Extension(
         "btoon._btoon",
-        [os.path.join(os.path.dirname(__file__), "btoon_python.cpp")],
+        ["btoon_python.cpp"],
         include_dirs=[btoon_include],
         library_dirs=[btoon_lib] + library_dirs_from_pkg_config,
         libraries=libraries,
