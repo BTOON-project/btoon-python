@@ -56,10 +56,11 @@ jobs:
         uses: pypa/cibuildwheel@v2.16.5
         env:
           CIBW_BUILD: cp38-* cp39-* cp310-* cp311-* cp312-*
-          CIBW_SKIP: "*-musllinux_* *-manylinux_i686"
+          CIBW_SKIP: "*-musllinux_* *-manylinux_i686 *-manylinux_2_17*"
           CIBW_ARCHS_MACOS: "x86_64 arm64"
           CIBW_ARCHS_LINUX: "x86_64"
           CIBW_ARCHS_WINDOWS: "AMD64"
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
           # Build btoon-core once before building all Python wheels
           CIBW_BEFORE_ALL_LINUX: |
             echo "Installing dependencies..."
