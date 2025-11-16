@@ -7,8 +7,8 @@ __version__ = "0.0.1"
 
 # Find btoon-core installation
 btoon_core_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "core"))
-btoon_include = os.path.join(btoon_core_path, "build_shared", "install", "include")
-btoon_lib = os.path.join(btoon_core_path, "build_shared", "install", "lib")
+btoon_include = os.path.join(btoon_core_path, "include")
+btoon_lib = os.path.join(btoon_core_path, "build")
 
 # Set up runtime library search path
 extra_link_args = []
@@ -16,13 +16,13 @@ if sys.platform == 'darwin':
     # macOS: embed rpath so dylib can be found at runtime
     extra_link_args.extend([
         f'-Wl,-rpath,{btoon_lib}',
-        f'-Wl,-rpath,@loader_path/core/build_shared/install/lib',
+        f'-Wl,-rpath,@loader_path/core/build',
     ])
 elif sys.platform.startswith('linux'):
     # Linux: use $ORIGIN for relative rpath
     extra_link_args.extend([
         f'-Wl,-rpath,{btoon_lib}',
-        '-Wl,-rpath,$ORIGIN/core/build_shared/install/lib',
+        '-Wl,-rpath,$ORIGIN/core/build',
     ])
 
 # Try to find optional compression libraries
