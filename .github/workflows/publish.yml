@@ -65,29 +65,37 @@ jobs:
           # Build btoon-core once before building all Python wheels
           CIBW_BEFORE_ALL_LINUX: |
             echo "Installing dependencies..."
-            yum install -y zlib-devel openssl-devel cmake3 git || exit 1
+            yum install -y zlib-devel openssl-devel cmake3 make gcc gcc-c++ git || exit 1
+            echo "Current directory: $(pwd)"
+            ls -la
             echo "Checking for core directory..."
-            if [ ! -d core/.git ]; then
-              echo "Core not found, cloning..."
+            if [ ! -d core ] || [ ! -f core/CMakeLists.txt ]; then
+              echo "Core submodule not found or incomplete, cloning..."
               rm -rf core
-              git clone https://github.com/BTOON-project/btoon-core.git core || exit 1
+              git clone --depth 1 https://github.com/BTOON-project/btoon-core.git core || exit 1
             fi
+            echo "Core directory contents:"
+            ls -la core/
             echo "Entering core directory..."
             cd core || exit 1
             echo "Creating build directory..."
             mkdir -p build
             cd build || exit 1
             echo "Running cmake..."
-            cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON || exit 1
+            cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON || exit 1
             echo "Building..."
             make -j$(nproc) || exit 1
           CIBW_BEFORE_ALL_MACOS: |
+            echo "Current directory: $(pwd)"
+            ls -la
             echo "Checking for core directory..."
-            if [ ! -d core/.git ]; then
-              echo "Core not found, cloning..."
+            if [ ! -d core ] || [ ! -f core/CMakeLists.txt ]; then
+              echo "Core submodule not found or incomplete, cloning..."
               rm -rf core
-              git clone https://github.com/BTOON-project/btoon-core.git core || exit 1
+              git clone --depth 1 https://github.com/BTOON-project/btoon-core.git core || exit 1
             fi
+            echo "Core directory contents:"
+            ls -la core/
             echo "Entering core directory..."
             cd core || exit 1
             echo "Creating build directory..."
@@ -95,7 +103,7 @@ jobs:
             cd build || exit 1
             echo "Running cmake..."
             export MACOSX_DEPLOYMENT_TARGET=10.15
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON || exit 1
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON || exit 1
             echo "Building..."
             make -j$(sysctl -n hw.ncpu) || exit 1
           CIBW_BEFORE_ALL_WINDOWS: |
