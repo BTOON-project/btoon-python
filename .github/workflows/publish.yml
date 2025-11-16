@@ -49,6 +49,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          vcpkg install zlib:x64-windows openssl:x64-windows
           where cmake
           cmake --version
 
@@ -100,6 +101,7 @@ jobs:
           CIBW_BEFORE_ALL_WINDOWS: |
             echo Installing dependencies
             choco install cmake git --installargs ADD_CMAKE_TO_PATH=System -y
+            vcpkg install zlib:x64-windows openssl:x64-windows
             echo Checking for core directory
             if not exist core\.git rmdir /s /q core 2>nul
             if not exist core git clone https://github.com/BTOON-project/btoon-core.git core
@@ -107,7 +109,7 @@ jobs:
             mkdir build
             cd build
             echo Running cmake
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF -DBTOON_WITH_LZ4=OFF -DBTOON_WITH_ZSTD=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
             echo Building
             cmake --build . --config Release
           CIBW_TEST_COMMAND: "python -c \"import btoon; data = {'test': True}; enc = btoon.encode(data); dec = btoon.decode(enc); assert dec == data; print('✅ Test passed')\""
