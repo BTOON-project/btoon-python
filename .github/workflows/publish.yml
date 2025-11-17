@@ -45,7 +45,7 @@ jobs:
   publish:
     needs: [build-sdist]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' && (github.event.inputs.dry_run == '' || github.event.inputs.dry_run == 'false')
+    if: github.event.inputs.dry_run != 'true'
 
     steps:
       - name: Download all artifacts
@@ -69,7 +69,7 @@ jobs:
 
   test-published:
     needs: publish
-    if: github.event_name == 'release'
+    if: github.event.inputs.dry_run != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:

@@ -19,65 +19,61 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Verify submodule checkout (Unix)
-        if: runner.os != 'Windows'
+      - name: Download pre-built btoon-core (Linux)
+        if: runner.os == 'Linux'
+        env:
+          CORE_VERSION: v0.0.1
         run: |
-          ls -la core/
-          test -f core/CMakeLists.txt || (echo "ERROR: core/CMakeLists.txt not found" && exit 1)
+          echo "Downloading pre-built btoon-core ${CORE_VERSION} for Linux..."
+          wget -q https://github.com/BTOON-project/btoon-core/releases/download/${CORE_VERSION}/btoon-${CORE_VERSION}-linux-x64.tar.gz
+          echo "Extracting to core/build/..."
+          mkdir -p core/build
+          tar xzf btoon-${CORE_VERSION}-linux-x64.tar.gz -C core/build --strip-components=1
+          ls -la core/build/
 
-      - name: Verify submodule checkout (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
+      - name: Download pre-built btoon-core (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CORE_VERSION: v0.0.1
         run: |
-          dir core\
-          if not exist core\CMakeLists.txt (echo ERROR: core\CMakeLists.txt not found && exit 1)
+          echo "Downloading pre-built btoon-core ${CORE_VERSION} for macOS..."
+          if [ "$(uname -m)" = "arm64" ]; then
+            ARCH="arm64"
+          else
+            ARCH="x64"
+          fi
+          wget -q https://github.com/BTOON-project/btoon-core/releases/download/${CORE_VERSION}/btoon-${CORE_VERSION}-darwin-${ARCH}.tar.gz
+          echo "Extracting to core/build/..."
+          mkdir -p core/build
+          tar xzf btoon-${CORE_VERSION}-darwin-${ARCH}.tar.gz -C core/build --strip-components=1
+          ls -la core/build/
+
+      - name: Download pre-built btoon-core (Windows)
+        if: runner.os == 'Windows'
+        env:
+          CORE_VERSION: v0.0.1
+        shell: bash
+        run: |
+          echo "Downloading pre-built btoon-core ${CORE_VERSION} for Windows..."
+          curl -L -o btoon-windows.zip https://github.com/BTOON-project/btoon-core/releases/download/${CORE_VERSION}/btoon-${CORE_VERSION}-windows-x64.zip
+          echo "Extracting to core/build/..."
+          mkdir -p core/build/Release
+          unzip -q btoon-windows.zip -d core/build-temp
+          cp -r core/build-temp/btoon-${CORE_VERSION}-windows-x64/* core/build/Release/
+          ls -la core/build/Release/
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install build dependencies (Linux)
-        if: runner.os == 'Linux'
+      - name: Copy headers to expected location
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake zlib1g-dev libssl-dev
-
-      - name: Install build dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install cmake
-          which cmake
-          cmake --version
-
-      - name: Install build dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-          vcpkg install zlib:x64-windows openssl:x64-windows
-          where cmake
-          cmake --version
-
-      - name: Build btoon-core (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          cd core
-          mkdir -p build
-          cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-          cmake --build . --config Release -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
-          cd ../..
-
-      - name: Build btoon-core (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cd core
-          New-Item -ItemType Directory -Force -Path build
-          cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
-          cmake --build . --config Release
-          cd ../..
+          echo "Copying headers from submodule to build directory..."
+          mkdir -p core/build/include
+          cp -r core/include/* core/build/include/ 2>/dev/null || cp -r core/include/* core/build/Release/ 2>/dev/null || true
+          ls -la core/build/
 
       - name: Install Python dependencies
         run: |
