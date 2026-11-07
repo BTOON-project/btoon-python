@@ -1,8 +1,9 @@
 name: Wheels
 
 # Builds wheels for every supported platform on a version tag and publishes them to
-# PyPI with trusted publishing (configure the "pypi" environment + PyPI trusted
-# publisher for this repository first).
+# PyPI: with the PYPI_API_TOKEN secret if set, otherwise with trusted publishing
+# (PyPI project settings -> Publishing: BTOON-project/btoon-python, wheels.yml,
+# environment "pypi"). Run it by hand (workflow_dispatch) to build without publishing.
 on:
   push:
     tags: ['v*']
@@ -60,4 +61,12 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Check that the tag matches the package version
+        run: |
+          ls dist
+          test -n "$(find dist -name "btoon-${GITHUB_REF_NAME#v}[-.]*")" || { echo "no files for ${GITHUB_REF_NAME#v}"; exit 1; }
+      # Uses the PYPI_API_TOKEN secret when it is set, PyPI trusted publishing otherwise.
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
