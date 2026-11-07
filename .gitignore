@@ -117,11 +117,6 @@ benchmark-results/
 # Security
 .cursor/rules/snyk_rules.mdc
 
-# Cython
-*.c
-*.cpp
-!btoon_python.cpp  # Keep our main binding file
-
 # Local configuration
 .env
 .env.local
