@@ -1,112 +1,72 @@
 [build-system]
-requires = [
-    "setuptools>=61.0",
-    "wheel",
-    "pybind11>=2.10.0",
-]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.10", "pybind11>=2.13"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "btoon"
-version = "0.0.1"
-description = "High-performance binary serialization format for Python"
+version = "0.1.0"
+description = "BTOON: compact binary serialization — MessagePack plus columnar tables, timestamps, big ints and vectors"
 readme = "README.md"
-authors = [
-    {name = "BTOON Contributors", email = "hello@btoon.net"}
-]
-license = {text = "MIT"}
+license = { text = "MIT" }
+authors = [{ name = "BTOON Contributors", email = "hello@btoon.net" }]
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["serialization", "binary", "messagepack", "msgpack", "tabular", "columnar", "compression"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: C++",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: C++",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: System :: Archiving :: Compression",
-    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
-    "Topic :: Database",
-    "Topic :: Scientific/Engineering",
-    "Operating System :: OS Independent",
-    "Operating System :: POSIX :: Linux",
-    "Operating System :: MacOS :: MacOS X",
-    "Operating System :: Microsoft :: Windows",
+    "Typing :: Typed",
 ]
-keywords = ["serialization", "binary", "messagepack", "compression", "performance", "tabular", "data"]
-requires-python = ">=3.8"
-dependencies = []
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-cov",
-    "pytest-benchmark",
-    "black",
-    "flake8",
-    "mypy",
-    "build",
-    "twine",
-]
-numpy = [
-    "numpy>=1.19.0",
-]
-pandas = [
-    "pandas>=1.2.0",
-    "numpy>=1.19.0",
-]
-full = [
-    "numpy>=1.19.0",
-    "pandas>=1.2.0",
-    "aiofiles>=0.8.0",
-]
+test = ["pytest>=8", "msgpack>=1.0"]
 
 [project.urls]
 Homepage = "https://btoon.net"
-Documentation = "https://btoon.net/docs"
 Repository = "https://github.com/BTOON-project/btoon-python"
+Specification = "https://github.com/BTOON-project/btoon-core/blob/main/docs/SPEC.md"
 Issues = "https://github.com/BTOON-project/btoon-python/issues"
 
-[tool.setuptools]
-packages = ["btoon"]
-include-package-data = true
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+cmake.version = ">=3.20"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["btoon"]
+# The sdist must be buildable on its own, so it carries the core sources.
+sdist.include = [
+    "core/CMakeLists.txt", "core/LICENSE", "core/include/btoon/*.h", "core/src/*.cpp", "core/src/*.h",
+]
+sdist.exclude = [".github", "build", "tests/__pycache__", "core/.git", "core/tests", "core/tools", "core/docs"]
 
-[tool.setuptools.package-data]
-btoon = ["*.pyi", "py.typed"]
+[tool.scikit-build.cmake.define]
+BTOON_CORE_DIR = { env = "BTOON_CORE_DIR", default = "" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
+# importlib mode: test the installed package, never the source tree's btoon/ (no _btoon there).
+addopts = "-ra --import-mode=importlib"
 
-[tool.black]
-line-length = 100
-target-version = ["py38", "py39", "py310", "py311", "py312"]
-include = '\.pyi?$'
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux_i686 *-win32 *-manylinux_i686"
+test-requires = ["pytest>=8", "msgpack>=1.0"]
+test-command = "pytest {project}/tests -q"
+build-verbosity = 1
 
-[tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-ignore_missing_imports = true
+[tool.cibuildwheel.linux]
+before-all = "yum install -y zlib-devel || (apt-get update && apt-get install -y zlib1g-dev) || apk add zlib-dev"
 
-[tool.coverage.run]
-source = ["btoon"]
-omit = ["*/tests/*", "*/examples/*"]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-]
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }

@@ -1,322 +1,126 @@
-# BTOON for Python
+# btoon for Python
 
-[![PyPI version](https://img.shields.io/pypi/v/btoon.svg)](https://pypi.org/project/btoon/)
-[![Python Versions](https://img.shields.io/pypi/pyversions/btoon.svg)](https://pypi.org/project/btoon/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![PyPI](https://img.shields.io/pypi/v/btoon.svg)](https://pypi.org/project/btoon/)
+[![Python](https://img.shields.io/pypi/pyversions/btoon.svg)](https://pypi.org/project/btoon/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-High-performance binary serialization format for Python applications with native C++ performance.
-
-## Features
-
-- 🚀 **High Performance** - Native C++ implementation with Python bindings
-- 📦 **Compact Binary Format** - Smaller than JSON, faster than Pickle
-- 🗜️ **Built-in Compression** - ZLIB, LZ4, ZSTD, Brotli, Snappy support
-- 📊 **NumPy & Pandas Integration** - Efficient array and DataFrame serialization
-- 🔄 **Schema Evolution** - Forward and backward compatibility
-- ⚡ **Zero-Copy Operations** - Memory-efficient for large data
-- 🐍 **Pythonic API** - Native Python types and async support
-- 💰 **Financial Types** - Decimal, Currency, and Percentage support
-
-## Installation
+Python bindings for **BTOON**, a compact binary serialization format: **MessagePack plus a
+columnar encoding for lists of uniform dicts**, with timestamps, arbitrary-size integers,
+float vectors and optional compression/signing. It runs on the C++ reference
+implementation ([btoon-core](https://github.com/BTOON-project/btoon-core)) and implements
+spec 0.1.
 
 ```bash
 pip install btoon
 ```
 
-Or using conda:
+## Quick start
+
+```python
+import btoon
+
+rows = [{"id": i, "name": f"user{i}", "email": f"u{i}@example.com", "active": i % 2 == 0} for i in range(1000)]
+
+data = btoon.encode(rows)                 # bytes; tables are stored column by column
+assert btoon.decode(data) == rows
+
+packed = btoon.encode(rows, compress=True)   # zlib envelope, detected on decode
+signed = btoon.encode(rows, hmac_key=b"32 bytes of secret key material!")
+btoon.decode(signed, hmac_key=b"32 bytes of secret key material!")
+```
+
+## Why
+
+For record-shaped data the column layout skips repeating keys. Measured with Python 3.13
+on an Apple M4 Max, 10,000 records (`id`, `name`, `email`, `age`, `score`, `active`), best
+of 7:
+
+| | Size | Encode | Decode |
+|---|---:|---:|---:|
+| `json` | 1,138 KB | 4.16 ms | 3.68 ms |
+| `msgpack` 1.2 (C extension) | 767 KB | 1.81 ms | 3.20 ms |
+| **`btoon`** | **447 KB** | **0.77 ms** | **3.15 ms** |
+
+For data that isn't tabular (nested and irregular), BTOON is byte-for-byte canonical
+MessagePack, and its speed is close to msgpack's: 2.54 ms encode / 4.95 ms decode vs
+2.42 / 4.32 ms on a comparable dataset. Sizes and timings depend on your data. Measure
+with your own.
+
+## Types
+
+| Python → BTOON → Python | Notes |
+|---|---|
+| `None`, `bool`, `float`, `str` | float is always float64; NaN, ±inf and -0.0 are kept |
+| `int` | Any size. Outside 64 bits it uses the bigint extension. |
+| `bytes`, `bytearray`, `memoryview` → `bytes` | |
+| `list`, `tuple` → `list` | Lists of dicts with identical keys go tabular automatically when that is smaller |
+| `dict` (str keys) → `dict` | Keys are written in sorted (UTF-8 byte) order |
+| `datetime` → aware `datetime` | Naive values are taken as UTC. Decoding has microsecond precision. |
+| `btoon.Timestamp` | Nanosecond precision and an optional UTC offset. `decode(..., timestamps="object")` |
+| `array.array('f'/'d')`, 1-D float32/float64 `numpy` arrays → `array.array` | Packed float vectors, e.g. embeddings. Use `vectors="list"` or `"numpy"` to change the result type. |
+| `btoon.ExtType(code, data)` | Any other extension type |
+
+Other objects raise `TypeError` unless you pass `default=` (like `json.dumps`):
+
+```python
+btoon.encode(obj, default=lambda o: o.__dict__)
+```
+
+Self-referencing structures raise `btoon.BtoonError(code="max_depth")` instead of
+crashing.
+
+## Options
+
+```python
+btoon.encode(obj, *, compress=False, compression="zlib", auto_tabular=True,
+             max_depth=128, hmac_key=None, default=None)
+btoon.decode(data, *, strict=True, max_depth=128, max_decompressed_size=256 * 2**20,
+             auto_decompress=True, hmac_key=None, timestamps="datetime", vectors="array")
+btoon.compression_available("zstd")   # zlib is always available
+```
+
+## Untrusted input
+
+`decode` is safe on hostile bytes. It is bounds-checked and depth-limited, it never
+allocates more than the input justifies, it caps decompression, and in strict mode it
+rejects invalid UTF-8, duplicate keys and trailing data. Every failure raises
+`btoon.BtoonError` (a `ValueError`) whose `.code` is one of the spec's error codes:
+
+```python
+try:
+    btoon.decode(payload, max_depth=32, max_decompressed_size=4 << 20)
+except btoon.BtoonError as e:
+    print(e.code, e)    # e.g. "truncated  unexpected end of input (at byte 7)"
+```
+
+Parsing during `decode`, and compression and signing during `encode`, run with the GIL
+released, so other threads keep running. Converting to and from Python objects holds
+the GIL.
+
+## Interoperability
+
+Output with `auto_tabular=False` is canonical MessagePack. Any MessagePack library can
+read it, and `btoon.decode` reads any MessagePack whose map keys are strings, including
+MessagePack timestamps. With tabular encoding on, generic MessagePack decoders see each
+table as an opaque extension (type -10). The same bytes decode identically in the
+[Node.js](https://github.com/BTOON-project/btoon-nodejs),
+[JavaScript](https://github.com/BTOON-project/btoon-javascript),
+[Go](https://github.com/BTOON-project/btoon-go) and
+[PHP](https://github.com/BTOON-project/btoon-php) libraries.
+
+## Building from source
 
 ```bash
-conda install -c conda-forge btoon
-```
-
-## Quick Start
-
-```python
-import btoon
-
-# Encode data
-data = {
-    'name': 'BTOON',
-    'version': '0.0.1',
-    'features': ['fast', 'compact', 'typed'],
-    'metrics': {
-        'speed': 9000,
-        'size': 0.5
-    }
-}
-
-encoded = btoon.encode(data)
-print(f'Encoded size: {len(encoded)} bytes')
-
-# Decode data
-decoded = btoon.decode(encoded)
-print(f'Decoded: {decoded}')
-```
-
-## Advanced Features
-
-### Compression
-
-```python
-# Enable compression with different algorithms
-compressed = btoon.encode(data, compress=True)  # Default: zlib
-
-# Specify algorithm and level
-compressed = btoon.encode(data, 
-    compress=True,
-    algorithm='zstd',  # 'zlib', 'lz4', 'zstd', 'brotli', 'snappy'
-    level=3
-)
-```
-
-### NumPy Integration
-
-```python
-import numpy as np
-import btoon
-
-# Encode NumPy arrays efficiently
-array = np.random.rand(1000, 100)
-encoded = btoon.from_numpy(array)
-
-# Decode back to NumPy
-decoded = btoon.to_numpy(encoded)
-assert np.array_equal(array, decoded)
-```
-
-### Pandas Integration
-
-```python
-import pandas as pd
-import btoon
-
-# Encode DataFrames with columnar optimization
-df = pd.DataFrame({
-    'id': range(1000),
-    'name': [f'user_{i}' for i in range(1000)],
-    'score': np.random.rand(1000)
-})
-
-encoded = btoon.from_dataframe(df)
-print(f'Encoded size: {len(encoded)} bytes')
-
-# Decode back to DataFrame
-decoded_df = btoon.to_dataframe(encoded)
-assert df.equals(decoded_df)
-```
-
-### Extended Types
-
-```python
-from btoon import Timestamp, Decimal, Currency, Percentage
-from datetime import datetime
-
-# Timestamp with nanosecond precision
-ts = Timestamp.now()
-ts_from_dt = Timestamp.from_datetime(datetime.now())
-
-# Financial types with arbitrary precision
-price = Decimal("19.99")
-tax_rate = Percentage("8.25")
-total = Currency("USD", price * (1 + tax_rate.to_decimal()))
-
-data = {
-    'timestamp': ts,
-    'price': price,
-    'tax_rate': tax_rate,
-    'total': total
-}
-
-encoded = btoon.encode(data)
-decoded = btoon.decode(encoded)
-```
-
-### Async Support
-
-```python
-import asyncio
-import btoon
-
-async def process_data():
-    # Async encoding
-    async with btoon.async_stream('output.btoon', 'w') as stream:
-        await stream.encode({'chunk': 1})
-        await stream.encode({'chunk': 2})
-    
-    # Async decoding
-    async with btoon.async_stream('output.btoon', 'r') as stream:
-        async for obj in stream:
-            print(f'Decoded: {obj}')
-
-asyncio.run(process_data())
-```
-
-### File Operations
-
-```python
-# Context manager for file operations
-with btoon.open_btoon('data.btoon', 'w') as f:
-    f.encode({'record': 1})
-    f.encode({'record': 2})
-
-with btoon.open_btoon('data.btoon', 'r') as f:
-    for record in f:
-        print(record)
-```
-
-### Streaming
-
-```python
-from btoon import StreamEncoder, StreamDecoder
-
-# Stream encoding
-encoder = StreamEncoder()
-chunks = []
-for i in range(100):
-    chunk = encoder.encode_chunk({'id': i})
-    chunks.append(chunk)
-final = encoder.finalize()
-
-# Stream decoding
-decoder = StreamDecoder()
-for chunk in chunks:
-    objs = decoder.decode_chunk(chunk)
-    for obj in objs:
-        print(obj)
-```
-
-## Schema Support
-
-```python
-import btoon
-
-# Define schema
-schema = btoon.Schema({
-    'type': 'object',
-    'properties': {
-        'id': {'type': 'integer', 'required': True},
-        'name': {'type': 'string', 'required': True},
-        'age': {'type': 'integer', 'min': 0, 'max': 120}
-    }
-})
-
-# Validate and encode with schema
-if schema.validate(data):
-    encoded = btoon.encode(data, schema=schema)
-    decoded = btoon.decode(encoded, schema=schema)
-```
-
-## Performance
-
-BTOON provides significant performance improvements:
-
-| Operation | JSON | Pickle | BTOON | Improvement |
-|-----------|------|--------|-------|-------------|
-| Encode 1MB | 125ms | 85ms | 12ms | 10x faster |
-| Decode 1MB | 95ms | 45ms | 8ms | 11x faster |
-| Size | 1024KB | 780KB | 412KB | 60% smaller |
-
-### DataFrame Performance (10,000 rows × 20 columns)
-
-| Format | Encode | Decode | Size |
-|--------|--------|--------|------|
-| CSV | 450ms | 380ms | 8.2MB |
-| Pickle | 120ms | 95ms | 5.1MB |
-| Parquet | 85ms | 72ms | 2.3MB |
-| BTOON | 35ms | 28ms | 1.8MB |
-
-## API Reference
-
-### Core Functions
-
-#### `encode(data, compress=False, auto_tabular=True, **kwargs)`
-Encode Python data to BTOON format.
-
-#### `decode(data, decompress=False, **kwargs)`
-Decode BTOON data to Python objects.
-
-### NumPy Integration
-
-#### `from_numpy(array, compress=False)`
-Encode NumPy array to BTOON.
-
-#### `to_numpy(data)`
-Decode BTOON to NumPy array.
-
-### Pandas Integration
-
-#### `from_dataframe(df, compress=True)`
-Encode DataFrame to BTOON with columnar optimization.
-
-#### `to_dataframe(data)`
-Decode BTOON to DataFrame.
-
-### Extended Types
-
-#### `Timestamp`
-High-precision timestamp with nanoseconds and timezone.
-
-#### `Decimal`
-Arbitrary precision decimal numbers.
-
-#### `Currency`
-Currency values with code and amount.
-
-#### `Percentage`
-Percentage values with proper arithmetic.
-
-### Async Support
-
-#### `async_stream(path, mode='r')`
-Async context manager for file operations.
-
-#### `AsyncStreamEncoder`
-Async encoder for streaming data.
-
-#### `AsyncStreamDecoder`
-Async decoder for streaming data.
-
-## Examples
-
-See the [`examples/`](examples/) directory for more usage examples:
-- Basic encoding/decoding
-- NumPy and Pandas integration
-- Financial calculations
-- Async operations
-- Schema validation
-- Performance benchmarks
-
-## Requirements
-
-- Python >= 3.7
-- C++ compiler (for building from source)
-- NumPy (optional, for array support)
-- Pandas (optional, for DataFrame support)
-
-## Building from Source
-
-```bash
-git clone https://github.com/BTOON-project/btoon-python.git
+git clone --recursive https://github.com/BTOON-project/btoon-python
 cd btoon-python
-pip install -e .
-pytest tests/
+pip install ".[test]" && pytest
 ```
 
-## Contributing
-
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
+You need a C++20 compiler and CMake ≥ 3.20 (pip fetches scikit-build-core and pybind11).
+zlib comes from the system, except on Windows, where it is compiled in. When developing
+next to a btoon-core checkout, the build picks up `../btoon-core` automatically if
+`core/` is empty. You can also point it elsewhere with `BTOON_CORE_DIR=/path/to/btoon-core`.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Links
-
-- [Website](https://btoon.net)
-- [GitHub](https://github.com/BTOON-project/btoon-python)
-- [Documentation](https://btoon.readthedocs.io)
-- [PyPI Package](https://pypi.org/project/btoon/)
-
----
-
-Part of the BTOON project - High-performance binary serialization for modern applications.
+MIT

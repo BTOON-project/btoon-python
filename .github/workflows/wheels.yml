@@ -1,0 +1,63 @@
+name: Wheels
+
+# Builds wheels for every supported platform on a version tag and publishes them to
+# PyPI with trusted publishing (configure the "pypi" environment + PyPI trusted
+# publisher for this repository first).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    name: wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest        # manylinux/musllinux x86_64
+          - os: ubuntu-24.04-arm     # manylinux/musllinux aarch64
+          - os: macos-latest         # arm64 + x86_64 (cross-compiled)
+          - os: windows-latest       # AMD64 (zlib compiled in)
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pypa/cibuildwheel@v4.3.5
+        env:
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_TEST_SKIP: "*-macosx_x86_64"   # cross-compiled; can't run on the arm64 runner
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - run: pipx run build --sdist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish:
+    needs: [wheels, sdist]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
