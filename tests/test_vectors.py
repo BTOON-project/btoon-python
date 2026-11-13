@@ -1,9 +1,11 @@
 """Conformance: every vector in btoon-core/tests/vectors/btoon-vectors.json (spec §10)."""
 
 import array
+import inspect
 import json
 import math
 import os
+import struct
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,29 @@ def vectors_path() -> Path:
 
 
 VECTORS = json.loads(vectors_path().read_text(encoding="utf-8"))
+
+# Float vector elements (spec §10): "NaN" is the canonical quiet NaN of the width, "0x…" is
+# an exact bit pattern (vectors keep NaN payloads, §5.5), anything else is a decimal.
+_BITS = {"f": "I", "d": "Q"}
+_CANONICAL_NAN = {"f": 0x7FC00000, "d": 0x7FF8000000000000}
+
+
+def element_bits(s, typecode):
+    if s.startswith("0x"):
+        return int(s, 16)
+    if s == "NaN":
+        return _CANONICAL_NAN[typecode]
+    x = float(s)  # a decimal, "Infinity" or "-Infinity"
+    try:
+        packed = struct.pack("<" + typecode, x)
+    except OverflowError:  # beyond binary32's range: rounds to ±inf, like a C cast
+        packed = struct.pack("<" + typecode, math.copysign(math.inf, x))
+    return struct.unpack("<" + _BITS[typecode], packed)[0]
+
+
+def float_vector(elements, typecode):
+    bits = [element_bits(e, typecode) for e in elements]
+    return array.array(typecode, struct.pack(f"={len(bits)}{_BITS[typecode]}", *bits))
 
 
 def from_typed(t):
@@ -56,9 +81,9 @@ def from_typed(t):
         s, r = divmod(int(x), 1_000_000_000)
         return Timestamp(s, r)
     if kind == "float32_vector":
-        return array.array("f", [from_typed({"float": e}) for e in x])
+        return float_vector(x, "f")
     if kind == "float64_vector":
-        return array.array("d", [from_typed({"float": e}) for e in x])
+        return float_vector(x, "d")
     if kind == "ext":
         return ExtType(x["type"], bytes.fromhex(x["data"]))
     raise ValueError(kind)
@@ -81,7 +106,8 @@ def same(a, b):
             return math.isnan(a) and math.isnan(b)
         return a == b and math.copysign(1, a) == math.copysign(1, b)
     if isinstance(a, array.array) and isinstance(b, array.array):
-        return a.typecode == b.typecode and len(a) == len(b) and all(same(float(x), float(y)) for x, y in zip(a, b))
+        # Vectors are opaque buffers: elements compare bit for bit, NaN payloads included.
+        return a.typecode == b.typecode and a.tobytes() == b.tobytes()
     if isinstance(a, list) and isinstance(b, list):
         return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
     if isinstance(a, dict) and isinstance(b, dict):
@@ -91,7 +117,22 @@ def same(a, b):
     return a == b
 
 
-def options(v):
+DECODE_OPTIONS = ("strict", "max_depth", "max_decompressed_size", "max_values")
+
+
+def decode_options(v):
+    """The decoder options a vector sets (spec §10). The rest keep the file's defaults."""
+    opts = v.get("options", {})
+    unknown = set(opts) - {"hmac_key", *DECODE_OPTIONS}
+    assert not unknown, f"vector option(s) this harness doesn't know: {sorted(unknown)}"
+    out = {name: opts[name] for name in DECODE_OPTIONS if name in opts}
+    if "hmac_key" in opts:
+        out["hmac_key"] = bytes.fromhex(opts["hmac_key"])  # "" is an empty key: invalid_argument
+    return out
+
+
+def encode_options(v):
+    """Re-encoding a signed vector signs with its key."""
     opts = v.get("options", {})
     return {"hmac_key": bytes.fromhex(opts["hmac_key"])} if "hmac_key" in opts else {}
 
@@ -104,10 +145,21 @@ def test_spec_version():
     assert VECTORS["spec"] == btoon.SPEC_VERSION
 
 
-def _cases(vectors, error):
+def test_defaults_are_the_spec_defaults():
+    # Vectors without options use the file's defaults (spec §10, §7.1): decode's must match.
+    params = inspect.signature(btoon.decode).parameters
+    for name, value in VECTORS["defaults"].items():
+        assert params[name].default == value, name
+
+
+def kind_of(v):
+    return "refused" if "encode_error" in v else "invalid" if "error" in v else "valid"
+
+
+def _cases(vectors, kind):
     out = []
     for v in vectors["vectors"]:
-        if ("error" in v) != error:
+        if kind_of(v) != kind:
             continue
         req = v.get("requires")
         marks = []
@@ -118,15 +170,14 @@ def _cases(vectors, error):
 
 
 def pytest_generate_tests(metafunc):
-    if "valid" in metafunc.fixturenames:
-        metafunc.parametrize("valid", _cases(VECTORS, error=False))
-    elif "invalid" in metafunc.fixturenames:
-        metafunc.parametrize("invalid", _cases(VECTORS, error=True))
+    for kind in ("valid", "invalid", "refused"):
+        if kind in metafunc.fixturenames:
+            metafunc.parametrize(kind, _cases(VECTORS, kind))
 
 
 def test_decode(valid):
     data = bytes.fromhex(valid["hex"])
-    got = btoon.decode(data, timestamps="object", **options(valid))
+    got = btoon.decode(data, timestamps="object", **decode_options(valid))
     assert same(got, from_typed(valid["value"])), f"decoded {got!r}"
 
 
@@ -134,12 +185,21 @@ def test_canonical_encode(valid):
     if not valid["canonical"]:
         pytest.skip("decode-only vector")
     if contains(valid["value"], {"date", "datetime"}):
-        pytest.skip("no Python type maps to the date/datetime extensions (they decode to datetime)")
+        # They decode to datetime, which encodes as a timestamp (-1), and spec §5.7 forbids
+        # writing their ids as a raw ExtType.
+        pytest.skip("no Python value encodes to the date/datetime extensions")
     value = from_typed(valid["value"])
-    assert btoon.encode(value, **options(valid)).hex() == valid["hex"]
+    assert btoon.encode(value, **encode_options(valid)).hex() == valid["hex"]
 
 
 def test_rejects(invalid):
     with pytest.raises(btoon.BtoonError) as exc:
-        btoon.decode(bytes.fromhex(invalid["hex"]), **options(invalid))
+        btoon.decode(bytes.fromhex(invalid["hex"]), **decode_options(invalid))
     assert exc.value.code == invalid["error"], str(exc.value)
+
+
+def test_encode_refuses(refused):
+    # spec §10: encoders MUST refuse an encode_error vector's value, with that code.
+    with pytest.raises(btoon.BtoonError) as exc:
+        btoon.encode(from_typed(refused["value"]), **encode_options(refused))
+    assert exc.value.code == refused["encode_error"], str(exc.value)

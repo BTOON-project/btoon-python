@@ -29,7 +29,14 @@ class BtoonTypeError(BtoonError, TypeError):
 
 
 class ExtType(namedtuple("ExtType", ["code", "data"])):
-    """An extension value BTOON doesn't interpret: type ``code`` (-128..127) plus raw ``data`` bytes."""
+    """An extension value BTOON doesn't interpret: type ``code`` (-128..127) plus raw ``data`` bytes.
+
+    Codes -1 to -6 and -10 are BTOON's own types (timestamp, date, datetime, bigint, the
+    float vectors, tabular). Decoding never returns them as ``ExtType``, and encoding an
+    ``ExtType`` with one of them raises :class:`BtoonError` (``invalid_argument``, spec
+    §5.7), because a payload written verbatim could be malformed or non-canonical. The
+    ids reserved for future versions (-7 to -9, -11 to -128) are written as given.
+    """
 
     __slots__ = ()
     code: int

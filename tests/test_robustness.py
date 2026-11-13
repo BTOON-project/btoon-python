@@ -25,7 +25,8 @@ VECTORS = _load_vectors()
 
 
 def test_mutation_fuzz_only_raises_btoon_errors():
-    seeds = [bytes.fromhex(v["hex"]) for v in VECTORS["vectors"] if 0 < len(v["hex"]) <= 8192]
+    # encode_error vectors (spec §10) have a value but no bytes.
+    seeds = [bytes.fromhex(v["hex"]) for v in VECTORS["vectors"] if 0 < len(v.get("hex", "")) <= 8192]
     rng = random.Random(0xB7001)
     decoded = 0
     for _ in range(30000):

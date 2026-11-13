@@ -12,13 +12,15 @@ HMAC-signed envelopes. This package wraps the C++ reference implementation.
 
 from __future__ import annotations
 
+import operator
+import sys
 import warnings
 from typing import Any, Callable, Literal
 
 from btoon._types import BtoonError, BtoonTypeError, ExtType, Timestamp
 from btoon import _btoon
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 SPEC_VERSION: str = _btoon.SPEC_VERSION
 CORE_VERSION: str = _btoon.CORE_VERSION
 
@@ -36,8 +38,24 @@ __all__ = [
 
 Compression = Literal["zlib", "lz4", "zstd", "brotli", "snappy", "auto"]
 
-_DEFAULT_MAX_DEPTH = 128
-_DEFAULT_MAX_DECOMPRESSED = 256 * 1024 * 1024
+# Core's limits (spec §7 and §7.1).
+_DEFAULT_MAX_DEPTH: int = _btoon.DEFAULT_MAX_DEPTH  # 128
+_MAX_DEPTH_LIMIT: int = _btoon.MAX_DEPTH_LIMIT  # 1000
+_DEFAULT_MAX_DECOMPRESSED: int = _btoon.DEFAULT_MAX_DECOMPRESSED_SIZE  # 64 MiB
+_DEFAULT_MAX_VALUES: int = _btoon.DEFAULT_MAX_VALUES  # 2**20
+
+
+def _limit(name: str, value: Any, maximum: int | None = None) -> int:
+    """Checks a numeric option: a non-negative int, and at most ``maximum`` if given."""
+    try:
+        n = operator.index(value)
+    except TypeError:
+        raise BtoonTypeError("invalid_argument", f"{name} must be an int, not {type(value).__name__}") from None
+    if n < 0:
+        raise BtoonTypeError("invalid_argument", f"{name} must not be negative")
+    if maximum is not None and n > maximum:
+        raise BtoonTypeError("invalid_argument", f"{name} must be at most {maximum}")
+    return min(n, sys.maxsize)  # the native side takes a size_t; anything bigger is no limit anyway
 
 
 def encode(
@@ -64,16 +82,22 @@ def encode(
             save at least 5%, or for inputs under 256 bytes).
         compression: algorithm for ``compress``; see :func:`compression_available`.
         auto_tabular: use the columnar encoding for lists of uniform dicts when smaller.
-        max_depth: nesting limit; deeper (or self-referencing) values raise ``BtoonError``.
-        hmac_key: sign the result with HMAC-SHA256 using this key.
+        max_depth: nesting limit, at most 1000; deeper (or self-referencing) values raise
+            ``BtoonError`` with code ``max_depth``.
+        hmac_key: sign the result with HMAC-SHA256 using this key (bytes, or a str as
+            UTF-8). ``None`` means no signature; an empty key raises ``BtoonTypeError``.
         default: called for unsupported objects, like ``json.dumps(default=...)``.
+
+    :class:`ExtType` values with a code BTOON defines itself (-1 to -6, and -10) raise
+    ``BtoonError`` with code ``invalid_argument``: those types are written from their
+    typed values (``datetime``, :class:`Timestamp`, ``int``, float vectors, lists of dicts).
     """
     return _btoon.encode(
         obj,
         compress=compress,
         compression=compression,
         auto_tabular=auto_tabular,
-        max_depth=max_depth,
+        max_depth=_limit("max_depth", max_depth, _MAX_DEPTH_LIMIT),
         hmac_key=hmac_key,
         default=default,
     )
@@ -85,6 +109,7 @@ def decode(
     strict: bool = True,
     max_depth: int = _DEFAULT_MAX_DEPTH,
     max_decompressed_size: int = _DEFAULT_MAX_DECOMPRESSED,
+    max_values: int = _DEFAULT_MAX_VALUES,
     auto_decompress: bool = True,
     hmac_key: bytes | str | None = None,
     timestamps: Literal["datetime", "object"] = "datetime",
@@ -100,12 +125,24 @@ def decode(
     ``array.array`` (or lists / numpy arrays via ``vectors``), unknown extensions to
     :class:`ExtType`.
 
+    The limits bound the memory a hostile document can claim (spec §7.1). Exceeding
+    ``max_decompressed_size`` or ``max_values`` raises ``BtoonError`` with code
+    ``size_limit``; raise them to decode bigger documents.
+
     Args:
-        strict: reject trailing bytes, invalid UTF-8 and duplicate keys (spec §7).
-        max_depth: nesting limit.
-        max_decompressed_size: refuse compression envelopes that expand beyond this.
+        strict: reject trailing bytes, invalid UTF-8 and duplicate keys (spec §7). Map
+            keys and column names must be valid UTF-8 in either mode.
+        max_depth: nesting limit, at most 1000.
+        max_decompressed_size: refuse compression envelopes that expand beyond this many
+            bytes (default 64 MiB). It also caps the column-name bytes a table copies into
+            its rows (rows × the total length of its column names).
+        max_values: refuse documents that decode to more values than this (default
+            2**20 = 1,048,576). Every value counts once: the top-level value, each list
+            item, dict value and extension value, and each table row and cell. Dict keys
+            don't count.
         auto_decompress: if False, compressed input is rejected instead of decompressed.
-        hmac_key: require and verify an HMAC-SHA256 signature made with this key.
+        hmac_key: require and verify an HMAC-SHA256 signature made with this key. ``None``
+            means no key; an empty key raises ``BtoonTypeError``.
         timestamps: ``"datetime"`` (microsecond precision) or ``"object"`` (:class:`Timestamp`).
         vectors: how float vectors are returned.
         decompress: deprecated alias of ``auto_decompress`` (0.0.x API).
@@ -121,8 +158,9 @@ def decode(
     return _btoon.decode(
         data,
         strict=strict,
-        max_depth=max_depth,
-        max_decompressed_size=max_decompressed_size,
+        max_depth=_limit("max_depth", max_depth, _MAX_DEPTH_LIMIT),
+        max_decompressed_size=_limit("max_decompressed_size", max_decompressed_size),
+        max_values=_limit("max_values", max_values),
         auto_decompress=auto_decompress,
         hmac_key=hmac_key,
         timestamps=timestamps,
