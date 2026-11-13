@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 (2026-11-13)
 
-- **Core:** the `core/` submodule now points at btoon-core 0.1.4 (was 0.1.0). The encoder
-  and `decode()` paths this package uses are unchanged. Core's fixes since 0.1.0 are in
-  modules the package doesn't expose (the `Decoder` class's `hmac_key`, the zero-copy C
-  API) or in Android builds, so there's no release for this alone.
+- **Core:** built on btoon-core 0.1.4 (was 0.1.0), so `btoon.CORE_VERSION` is `"0.1.4"`.
+  The Python API and behavior are unchanged. Core's fixes since 0.1.0 are in parts this
+  package doesn't expose: the C++ `Decoder` class's `hmac_key`, the zero-copy C API,
+  shared memory and Android builds. The encoder and `decode()` paths the package uses
+  behave the same.
 
 ## 0.1.0 (2026-11-07)
 
