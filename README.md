@@ -8,7 +8,7 @@ Python bindings for **BTOON**, a compact binary serialization format: **MessageP
 columnar encoding for lists of uniform dicts**, with timestamps, arbitrary-size integers,
 float vectors and optional compression/signing. It runs on the C++ reference
 implementation ([btoon-core](https://github.com/BTOON-project/btoon-core)) and implements
-spec 0.1.
+spec 0.2.
 
 ```bash
 pip install btoon
@@ -58,7 +58,7 @@ with your own.
 | `datetime` → aware `datetime` | Naive values are taken as UTC. Decoding has microsecond precision. |
 | `btoon.Timestamp` | Nanosecond precision and an optional UTC offset. `decode(..., timestamps="object")` |
 | `array.array('f'/'d')`, 1-D float32/float64 `numpy` arrays → `array.array` | Packed float vectors, e.g. embeddings. Use `vectors="list"` or `"numpy"` to change the result type. |
-| `btoon.ExtType(code, data)` | Any other extension type |
+| `btoon.ExtType(code, data)` | Any other extension type. Codes -1 to -6 and -10 are BTOON's own types, written from the types above: encoding them raw raises `BtoonError` (`invalid_argument`). |
 
 Other objects raise `TypeError` unless you pass `default=` (like `json.dumps`):
 
@@ -74,21 +74,37 @@ crashing.
 ```python
 btoon.encode(obj, *, compress=False, compression="zlib", auto_tabular=True,
              max_depth=128, hmac_key=None, default=None)
-btoon.decode(data, *, strict=True, max_depth=128, max_decompressed_size=256 * 2**20,
-             auto_decompress=True, hmac_key=None, timestamps="datetime", vectors="array")
+btoon.decode(data, *, strict=True, max_depth=128, max_decompressed_size=64 * 2**20,
+             max_values=2**20, auto_decompress=True, hmac_key=None,
+             timestamps="datetime", vectors="array")
 btoon.compression_available("zstd")   # zlib is always available
 ```
+
+`max_depth` is at most 1000. `hmac_key=None` means no key. An empty key raises
+`BtoonTypeError` (code `invalid_argument`) instead of turning signing or verification off.
 
 ## Untrusted input
 
 `decode` is safe on hostile bytes. It is bounds-checked and depth-limited, it never
 allocates more than the input justifies, it caps decompression, and in strict mode it
-rejects invalid UTF-8, duplicate keys and trailing data. Every failure raises
-`btoon.BtoonError` (a `ValueError`) whose `.code` is one of the spec's error codes:
+rejects invalid UTF-8, duplicate keys and trailing data. Map keys and column names must be
+valid UTF-8 even with `strict=False`.
+
+Two limits bound the memory a document can claim (spec §7.1):
+
+- `max_decompressed_size` (64 MiB by default) caps what a compression envelope expands
+  to, and the column-name bytes a table copies into its rows (rows × total name length).
+- `max_values` (2**20 = 1,048,576 by default) caps how many values a document decodes to.
+  The top-level value, every list item and dict value, and every table row and cell count
+  once. Dict keys don't count.
+
+Going over either raises `size_limit`. Raise them to decode bigger documents, and keep the
+defaults (or lower them) for untrusted input. Every failure raises `btoon.BtoonError` (a
+`ValueError`) whose `.code` is one of the spec's error codes:
 
 ```python
 try:
-    btoon.decode(payload, max_depth=32, max_decompressed_size=4 << 20)
+    btoon.decode(payload, max_depth=32, max_decompressed_size=4 << 20, max_values=100_000)
 except btoon.BtoonError as e:
     print(e.code, e)    # e.g. "truncated  unexpected end of input (at byte 7)"
 ```

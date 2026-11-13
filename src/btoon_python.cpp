@@ -13,6 +13,7 @@
 #include <array>
 #include <bit>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -132,11 +133,7 @@ public:
         }
         if (PyTuple_Check(o) && !PyTuple_CheckExact(o) && PyObject_IsInstance(o, C->ExtType.ptr()) == 1) {
             // ExtType is a namedtuple: recognize it before treating tuples as sequences.
-            py::handle h(o);
-            py::bytes data = h.attr("data");
-            return enc_.encodeExtension(h.attr("code").cast<int8_t>(),
-                                        {reinterpret_cast<const uint8_t*>(PyBytes_AS_STRING(data.ptr())),
-                                         static_cast<size_t>(PyBytes_GET_SIZE(data.ptr()))});
+            return encode_ext(o);
         }
         if (PyList_Check(o) || PyTuple_Check(o)) return encode_sequence(o, depth);
         if (PyDict_Check(o)) return encode_dict(o, depth);
@@ -167,6 +164,23 @@ public:
 private:
     void check_depth(size_t depth) const {
         if (depth >= max_depth_) raise_btoon("max_depth", "maximum nesting depth exceeded (or the object contains a cycle)");
+    }
+
+    // A raw extension. Core rejects the ids BTOON defines (-1…-6, -10) with invalid_argument
+    // (SPEC §5.7): they are written from typed values, never verbatim. The code is checked
+    // here too, because ExtType._make() and tuple.__new__() skip ExtType's own validation.
+    void encode_ext(PyObject* o) {
+        py::handle h(o);
+        py::object code = h.attr("code");
+        int overflow = 0;
+        long c = PyLong_Check(code.ptr()) ? PyLong_AsLongAndOverflow(code.ptr(), &overflow) : 0;
+        if (c == -1 && PyErr_Occurred()) throw py::error_already_set();
+        if (!PyLong_Check(code.ptr()) || PyBool_Check(code.ptr()) || overflow || c < -128 || c > 127) {
+            raise_btoon("invalid_argument", "ExtType code must be an int in -128..127");
+        }
+        py::bytes data = h.attr("data");
+        enc_.encodeExtension(static_cast<int8_t>(c), {reinterpret_cast<const uint8_t*>(PyBytes_AS_STRING(data.ptr())),
+                                                      static_cast<size_t>(PyBytes_GET_SIZE(data.ptr()))});
     }
 
     void encode_int(PyObject* o) {
@@ -369,13 +383,18 @@ struct DecodeCtx {
     std::unordered_map<int, py::object> zones;
 };
 
+// Core guarantees that map keys and column names are valid UTF-8, in non-strict mode too
+// (SPEC §7): two invalid keys could otherwise become the same str and drop a value.
 py::object key_object(const std::string& k, DecodeCtx& ctx) {
-    if (k.size() > 64) return py::reinterpret_steal<py::object>(PyUnicode_DecodeUTF8(k.data(), static_cast<Py_ssize_t>(k.size()), ctx.strict ? "strict" : "surrogateescape"));
+    auto decode_key = [&k] {
+        PyObject* s = PyUnicode_DecodeUTF8(k.data(), static_cast<Py_ssize_t>(k.size()), "strict");
+        if (!s) throw py::error_already_set();
+        return py::reinterpret_steal<py::object>(s);
+    };
+    if (k.size() > 64) return decode_key();
     auto it = ctx.keys.find(k);
     if (it != ctx.keys.end()) return it->second;
-    PyObject* s = PyUnicode_DecodeUTF8(k.data(), static_cast<Py_ssize_t>(k.size()), ctx.strict ? "strict" : "surrogateescape");
-    if (!s) throw py::error_already_set();
-    py::object obj = py::reinterpret_steal<py::object>(s);
+    py::object obj = decode_key();
     if (ctx.keys.size() < 8192) ctx.keys.emplace(std::string_view(k), obj);
     return obj;
 }
@@ -513,11 +532,20 @@ CompressionAlgorithm parse_algorithm(const std::string& name) {
     raise_btoon("invalid_argument", "unknown compression algorithm: '" + name + "'", true);
 }
 
-std::string key_from(const py::object& key) {
-    if (key.is_none()) return {};
+// The HMAC key (SPEC §8). None is "no key"; a key is non-empty bytes or str (as UTF-8).
+std::optional<std::string> key_from(const py::object& key) {
+    if (key.is_none()) return std::nullopt;
     std::string k;
-    if (py::isinstance<py::str>(key) || py::isinstance<py::bytes>(key)) {
-        k = key.cast<std::string>();
+    if (PyBytes_Check(key.ptr())) {
+        k.assign(PyBytes_AS_STRING(key.ptr()), static_cast<size_t>(PyBytes_GET_SIZE(key.ptr())));
+    } else if (PyUnicode_Check(key.ptr())) {
+        Py_ssize_t n = 0;
+        const char* s = PyUnicode_AsUTF8AndSize(key.ptr(), &n);
+        if (!s) {  // a lone surrogate has no UTF-8 form
+            PyErr_Clear();
+            raise_btoon("invalid_argument", "hmac_key str contains a lone surrogate", true);
+        }
+        k.assign(s, static_cast<size_t>(n));
     } else {
         raise_btoon("invalid_argument", "hmac_key must be bytes or str", true);
     }
@@ -526,10 +554,19 @@ std::string key_from(const py::object& key) {
     return k;
 }
 
+// SPEC §7: a deeper limit would let input (or a deep object) exhaust the native stack.
+// btoon/__init__.py checks this first; this also covers direct calls into _btoon.
+void check_max_depth(size_t max_depth) {
+    if (max_depth > kMaxDepthLimit) {
+        raise_btoon("invalid_argument", "max_depth must be at most " + std::to_string(kMaxDepthLimit), true);
+    }
+}
+
 // --- Entry points -------------------------------------------------------------------------
 
 py::bytes py_encode(py::handle obj, bool compress, const std::string& compression, bool auto_tabular,
                     size_t max_depth, py::object hmac_key, py::object default_fn) {
+    check_max_depth(max_depth);
     EncodeOptions opts;
     opts.compress = compress;
     opts.compression_algorithm = parse_algorithm(compression);
@@ -544,7 +581,7 @@ py::bytes py_encode(py::handle obj, bool compress, const std::string& compressio
         walker.options_tabular_ = auto_tabular;
         walker.encode(obj.ptr(), 0);
         out = enc.release();
-        if (opts.compress || !opts.hmac_key.empty()) {
+        if (opts.compress || opts.hmac_key) {
             py::gil_scoped_release nogil;
             out = btoon::apply_envelopes(std::move(out), opts);
         }
@@ -554,12 +591,15 @@ py::bytes py_encode(py::handle obj, bool compress, const std::string& compressio
     return py::bytes(reinterpret_cast<const char*>(out.data()), out.size());
 }
 
-py::object py_decode(py::handle data, bool strict, size_t max_depth, size_t max_decompressed_size, bool auto_decompress,
-                  py::object hmac_key, const std::string& timestamps, const std::string& vectors) {
+py::object py_decode(py::handle data, bool strict, size_t max_depth, size_t max_decompressed_size, size_t max_values,
+                     bool auto_decompress, py::object hmac_key, const std::string& timestamps,
+                     const std::string& vectors) {
+    check_max_depth(max_depth);
     DecodeOptions opts;
     opts.strict = strict;
     opts.max_depth = max_depth;
     opts.max_decompressed_size = max_decompressed_size;
+    opts.max_values = max_values;
     opts.auto_decompress = auto_decompress;
     opts.hmac_key = key_from(hmac_key);
 
@@ -625,9 +665,14 @@ PYBIND11_MODULE(_btoon, m) {
     m.def("encode", &py_encode, py::arg("obj"), py::kw_only(), py::arg("compress"), py::arg("compression"),
           py::arg("auto_tabular"), py::arg("max_depth"), py::arg("hmac_key"), py::arg("default"));
     m.def("decode", &py_decode, py::arg("data"), py::kw_only(), py::arg("strict"), py::arg("max_depth"),
-          py::arg("max_decompressed_size"), py::arg("auto_decompress"), py::arg("hmac_key"), py::arg("timestamps"),
-          py::arg("vectors"));
+          py::arg("max_decompressed_size"), py::arg("max_values"), py::arg("auto_decompress"), py::arg("hmac_key"),
+          py::arg("timestamps"), py::arg("vectors"));
     m.def("compression_available", [](const std::string& name) { return btoon::compression_available(parse_algorithm(name)); });
     m.attr("CORE_VERSION") = btoon::version();
     m.attr("SPEC_VERSION") = btoon::spec_version();
+    // Core's limits (SPEC §7, §7.1), so the Python defaults can't drift from them.
+    m.attr("DEFAULT_MAX_DEPTH") = btoon::kDefaultMaxDepth;
+    m.attr("MAX_DEPTH_LIMIT") = btoon::kMaxDepthLimit;
+    m.attr("DEFAULT_MAX_DECOMPRESSED_SIZE") = btoon::kDefaultMaxDecompressedSize;
+    m.attr("DEFAULT_MAX_VALUES") = btoon::kDefaultMaxValues;
 }

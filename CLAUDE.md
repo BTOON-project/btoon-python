@@ -1,6 +1,6 @@
 # btoon-python
 
-pybind11 extension wrapping btoon-core. PyPI package `btoon`, BTOON spec 0.1.
+pybind11 extension wrapping btoon-core. PyPI package `btoon`, BTOON spec 0.2.
 
 ## Commands
 
