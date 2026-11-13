@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "btoon"
-version = "0.1.1"
+version = "0.1.2"
 description = "BTOON: compact binary serialization — MessagePack plus columnar tables, timestamps, big ints and vectors"
 readme = "README.md"
 license = { text = "MIT" }

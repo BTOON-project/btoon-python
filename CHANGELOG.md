@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2 (2026-11-13)
+
+- **Core:** built on btoon-core 0.1.5. Nested containers no longer reserve memory against
+  the same input at every level. On the review's inputs, 1 MiB of nested headers reserved
+  5 GB on 0.1.4; now it peaks near 100 MB.
+- **Fixed (memory safety):**
+  - Some `datetime` subclasses override `utcoffset()` to return something other than a
+    `timedelta`, such as an int, float or tuple. The encoder read that object as a
+    `timedelta`: a heap over-read that produced a garbage timestamp.
+  - Now a non-timedelta raises `BtoonTypeError`, and an offset of a day or more raises
+    `BtoonError` (`invalid_argument`). These are the rules CPython's `datetime` enforces.
+  - The bound also removes a signed overflow with huge offsets.
+
 ## 0.1.1 (2026-11-13)
 
 - **Core:** built on btoon-core 0.1.4 (was 0.1.0), so `btoon.CORE_VERSION` is `"0.1.4"`.

@@ -78,6 +78,20 @@ Timestamp datetime_to_timestamp(PyObject* o) {
     py::object off = py::reinterpret_borrow<py::object>(o).attr("utcoffset")();
     if (!off.is_none()) {
         PyObject* td = off.ptr();
+        // A datetime subclass can override utcoffset() to return anything. Reading a
+        // non-timedelta with the PyDateTime_DELTA_* macros is a heap over-read, and a huge
+        // timedelta overflows the arithmetic below. CPython's own datetime enforces the
+        // same rules.
+        if (!PyDelta_Check(td)) {
+            raise_btoon("invalid_argument",
+                        std::string("utcoffset() must return a timedelta or None, not ") + Py_TYPE(td)->tp_name,
+                        true);
+        }
+        if (PyDateTime_DELTA_GET_DAYS(td) < -1 || PyDateTime_DELTA_GET_DAYS(td) > 0 ||
+            (PyDateTime_DELTA_GET_DAYS(td) == -1 && PyDateTime_DELTA_GET_SECONDS(td) == 0 &&
+             PyDateTime_DELTA_GET_MICROSECONDS(td) == 0)) {
+            raise_btoon("invalid_argument", "utcoffset() must be strictly between -24 hours and 24 hours");
+        }
         int64_t off_us = (PyDateTime_DELTA_GET_DAYS(td) * 86400LL + PyDateTime_DELTA_GET_SECONDS(td)) * 1000000LL +
                          PyDateTime_DELTA_GET_MICROSECONDS(td);
         int64_t total_us = secs * 1000000LL + nanos / 1000 - off_us;

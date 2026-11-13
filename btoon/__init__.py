@@ -18,7 +18,7 @@ from typing import Any, Callable, Literal
 from btoon._types import BtoonError, BtoonTypeError, ExtType, Timestamp
 from btoon import _btoon
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 SPEC_VERSION: str = _btoon.SPEC_VERSION
 CORE_VERSION: str = _btoon.CORE_VERSION
 
