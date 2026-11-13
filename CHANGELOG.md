@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## Unreleased
+
+- **Core:** the `core/` submodule now points at btoon-core 0.1.4 (was 0.1.0). The encoder
+  and `decode()` paths this package uses are unchanged. Core's fixes since 0.1.0 are in
+  modules the package doesn't expose (the `Decoder` class's `hmac_key`, the zero-copy C
+  API) or in Android builds, so there's no release for this alone.
+
+## 0.1.0 (2026-11-07)
 
 A rewrite on btoon-core 0.1.0 (BTOON spec 0.1).
 
