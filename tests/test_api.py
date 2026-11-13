@@ -281,6 +281,36 @@ def test_msgpack_reads_btoon_and_vice_versa():
 
 
 def test_version_info():
-    assert btoon.__version__ == "0.1.1"
+    assert btoon.__version__ == "0.1.2"
     assert btoon.SPEC_VERSION == "0.1"
-    assert btoon.version() == "0.1.1"
+    assert btoon.version() == "0.1.2"
+
+
+def test_utcoffset_must_return_a_timedelta_under_a_day():
+    # Review 2026-11-13: a datetime subclass whose utcoffset() returned an int was read
+    # as a timedelta: a garbage timestamp, and a heap over-read under ASan.
+    class ReturnsInt(dt.datetime):
+        def utcoffset(self):
+            return 1000000
+
+    class TwoDays(dt.datetime):
+        def utcoffset(self):
+            return dt.timedelta(days=2)
+
+    class MinusOneDay(dt.datetime):
+        def utcoffset(self):
+            return dt.timedelta(days=-1)
+
+    class AlmostADay(dt.datetime):
+        def utcoffset(self):
+            return dt.timedelta(hours=23, minutes=59)
+
+    with pytest.raises(TypeError) as err:
+        btoon.encode(ReturnsInt(2024, 1, 1, tzinfo=dt.timezone.utc))
+    assert err.value.code == "invalid_argument"
+    for cls in (TwoDays, MinusOneDay):
+        with pytest.raises(btoon.BtoonError) as err:
+            btoon.encode(cls(2024, 1, 1, tzinfo=dt.timezone.utc))
+        assert err.value.code == "invalid_argument"
+    decoded = btoon.decode(btoon.encode(AlmostADay(2024, 1, 2, tzinfo=dt.timezone.utc)))
+    assert decoded == dt.datetime(2024, 1, 1, 0, 1, tzinfo=dt.timezone.utc)
