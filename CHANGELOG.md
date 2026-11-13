@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 (2026-11-14)
+
+- **Wheels for CPython 3.15.** 0.2.0 shipped wheels for 3.10–3.14 only, so on 3.15
+  `pip install btoon` built from the sdist, which fails unless a C++20 compiler is
+  installed. The wheel build now covers every CPython the pinned cibuildwheel supports
+  from `requires-python` (3.10) up, instead of a hand-kept list, and CI tests 3.15.
+- Same code as 0.2.0, on btoon-core 0.2.0. `test_version_info` now checks `__version__`
+  against the installed package's metadata instead of a literal.
+
 ## 0.2.0 (2026-11-14)
 
 BTOON spec 0.2, on btoon-core 0.2.0: `btoon.SPEC_VERSION` is `"0.2"`. The wire format
