@@ -281,6 +281,6 @@ def test_msgpack_reads_btoon_and_vice_versa():
 
 
 def test_version_info():
-    assert btoon.__version__ == "0.1.0"
+    assert btoon.__version__ == "0.1.1"
     assert btoon.SPEC_VERSION == "0.1"
-    assert btoon.version() == "0.1.0"
+    assert btoon.version() == "0.1.1"
