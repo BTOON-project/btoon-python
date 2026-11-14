@@ -21,7 +21,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.10", "3.12", "3.14", "3.15"]
+        # 3.14t: free-threaded CPython (the extension declares it doesn't need the GIL)
+        python: ["3.10", "3.12", "3.14", "3.14t", "3.15"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -35,6 +36,11 @@ jobs:
       - name: Test
         # the pytest entry point (not `python -m pytest`) so the source tree's btoon/ can't shadow the install
         run: pytest -q
+        env:
+          # Free-threaded: keep the GIL off for the whole run, so the thread tests run in
+          # parallel even if a test dependency re-enabled it. tests/test_threads.py checks,
+          # without this, that importing btoon leaves the GIL off.
+          PYTHON_GIL: ${{ endsWith(matrix.python, 't') && '0' || '' }}
 
   sdist:
     runs-on: ubuntu-latest
@@ -48,6 +54,11 @@ jobs:
       - run: python -m pip install build
       - run: python -m build --sdist
       - name: Build and test from the sdist alone
+        # Outside the checkout, so the tests can only use what the sdist ships: the core
+        # sources and the conformance vectors.
         run: |
-          python -m pip install dist/*.tar.gz pytest msgpack
+          mkdir "$RUNNER_TEMP/sdist"
+          tar -xzf dist/*.tar.gz -C "$RUNNER_TEMP/sdist" --strip-components=1
+          cd "$RUNNER_TEMP/sdist"
+          python -m pip install ".[test]"
           pytest -q
