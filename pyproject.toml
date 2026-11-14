@@ -1,11 +1,12 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "pybind11>=2.13"]
+# pybind11 3: free-threading support (py::mod_gil_not_used, thread-safe internals).
+requires = ["scikit-build-core>=0.10", "pybind11>=3.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "btoon"
-version = "0.2.1"
-description = "BTOON: compact binary serialization — MessagePack plus columnar tables, timestamps, big ints and vectors"
+version = "0.3.0"
+description = "BTOON: compact binary serialization — MessagePack plus columnar tables, timestamps, dates, big ints and vectors"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "BTOON Contributors", email = "hello@btoon.net" }]
@@ -26,6 +27,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: Free Threading :: 3 - Stable",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
@@ -45,9 +47,11 @@ minimum-version = "build-system.requires"
 cmake.version = ">=3.20"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["btoon"]
-# The sdist must be buildable on its own, so it carries the core sources.
+# The sdist must build and test on its own, so it carries the core sources and the
+# conformance vectors (tests/ reads core/tests/vectors/btoon-vectors.json).
 sdist.include = [
     "core/CMakeLists.txt", "core/LICENSE", "core/include/btoon/*.h", "core/src/*.cpp", "core/src/*.h",
+    "core/tests/vectors/btoon-vectors.json",
 ]
 sdist.exclude = [".github", "build", "tests/__pycache__", "core/.git", "core/tests", "core/tools", "core/docs"]
 
@@ -62,10 +66,11 @@ addopts = "-ra --import-mode=importlib"
 [tool.cibuildwheel]
 # Every CPython the pinned cibuildwheel supports, from requires-python (3.10) up, so a
 # new CPython gets wheels when the pin is bumped. 0.2.0 listed the versions by hand and
-# shipped without 3.15 wheels. Free-threaded builds (cp3XXt) are skipped: the extension
-# doesn't declare free-threading support yet.
+# shipped without 3.15 wheels. That includes the free-threaded builds (cp314t, cp315t):
+# the extension declares Py_MOD_GIL_NOT_USED. cibuildwheel 4 no longer builds the
+# experimental 3.13t.
 build = "cp3*"
-skip = "cp3??t-* *-musllinux_i686 *-win32 *-manylinux_i686"
+skip = "*-musllinux_i686 *-win32 *-manylinux_i686"
 test-requires = ["pytest>=8", "msgpack>=1.0"]
 test-command = "pytest {project}/tests -q"
 build-verbosity = 1

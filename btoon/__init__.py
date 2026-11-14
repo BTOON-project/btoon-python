@@ -1,7 +1,7 @@
 """BTOON — compact binary serialization for Python.
 
 BTOON is MessagePack plus a columnar encoding for lists of uniform dicts, extra
-types (timestamps, big integers, float vectors) and optional compression and
+types (timestamps, dates, big integers, float vectors) and optional compression and
 HMAC-signed envelopes. This package wraps the C++ reference implementation.
 
     >>> import btoon
@@ -17,10 +17,10 @@ import sys
 import warnings
 from typing import Any, Callable, Literal
 
-from btoon._types import BtoonError, BtoonTypeError, ExtType, Timestamp
+from btoon._types import BtoonError, BtoonTypeError, Date, DateTime, ExtType, Timestamp
 from btoon import _btoon
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 SPEC_VERSION: str = _btoon.SPEC_VERSION
 CORE_VERSION: str = _btoon.CORE_VERSION
 
@@ -32,7 +32,10 @@ __all__ = [
     "BtoonTypeError",
     "ExtType",
     "Timestamp",
+    "Date",
+    "DateTime",
     "SPEC_VERSION",
+    "CORE_VERSION",
     "__version__",
 ]
 
@@ -73,9 +76,11 @@ def encode(
     Supported types: ``None``, ``bool``, ``int`` (any size), ``float``, ``str``,
     ``bytes``/``bytearray``/``memoryview``, ``list``/``tuple``, ``dict`` with ``str``
     keys, ``datetime`` (naive values are taken as UTC), :class:`Timestamp`,
-    :class:`ExtType`, ``array.array('f'|'d')`` and 1-D float32/float64 numpy arrays
-    (as float vectors). Anything else is passed to ``default`` if given, whose return
-    value is encoded instead; otherwise :class:`BtoonTypeError` is raised.
+    :class:`Date`, :class:`DateTime`, :class:`ExtType`, ``array.array('f'|'d')`` and
+    1-D float32/float64 numpy arrays (as float vectors, whatever their strides or byte
+    order; other arrays are encoded via ``tolist()``). Anything else, including numpy
+    masked arrays, is passed to ``default`` if given, whose return value is encoded in
+    its place; otherwise :class:`BtoonTypeError` is raised.
 
     Args:
         compress: wrap the result in a compression envelope (skipped when it wouldn't
@@ -86,20 +91,25 @@ def encode(
             ``BtoonError`` with code ``max_depth``.
         hmac_key: sign the result with HMAC-SHA256 using this key (bytes, or a str as
             UTF-8). ``None`` means no signature; an empty key raises ``BtoonTypeError``.
-        default: called for unsupported objects, like ``json.dumps(default=...)``.
+        default: called for unsupported objects, like ``json.dumps(default=...)``. Its
+            return value takes the object's place, at the same depth; if that is
+            unsupported too, ``default`` is called on it again (at most ``max_depth`` + 1
+            times in a row, then ``BtoonError`` with code ``max_depth``).
 
     :class:`ExtType` values with a code BTOON defines itself (-1 to -6, and -10) raise
     ``BtoonError`` with code ``invalid_argument``: those types are written from their
-    typed values (``datetime``, :class:`Timestamp`, ``int``, float vectors, lists of dicts).
+    typed values (``datetime``, :class:`Timestamp`, :class:`Date`, :class:`DateTime`,
+    ``int``, float vectors, lists of dicts).
     """
+    # Positional: pybind11's keyword matching crashes when an allocation fails.
     return _btoon.encode(
         obj,
-        compress=compress,
-        compression=compression,
-        auto_tabular=auto_tabular,
-        max_depth=_limit("max_depth", max_depth, _MAX_DEPTH_LIMIT),
-        hmac_key=hmac_key,
-        default=default,
+        bool(compress),
+        compression,
+        bool(auto_tabular),
+        _limit("max_depth", max_depth, _MAX_DEPTH_LIMIT),
+        hmac_key,
+        default,
     )
 
 
@@ -120,10 +130,10 @@ def decode(
 
     Compression envelopes are detected and decompressed automatically (bounded by
     ``max_decompressed_size``). Integers decode to ``int``, binary to ``bytes``, maps to
-    ``dict``, timestamps/dates to aware ``datetime`` (UTC, or the stored offset; values
-    outside ``datetime``'s range decode as :class:`Timestamp`), float vectors to
-    ``array.array`` (or lists / numpy arrays via ``vectors``), unknown extensions to
-    :class:`ExtType`.
+    ``dict``, timestamps, dates and datetimes to aware ``datetime`` (UTC, or the stored
+    offset), float vectors to ``array.array`` (or lists / numpy arrays via ``vectors``),
+    unknown extensions to :class:`ExtType`. An instant outside ``datetime``'s range
+    decodes as :class:`Timestamp`, :class:`Date` or :class:`DateTime`, by its extension.
 
     The limits bound the memory a hostile document can claim (spec §7.1). Exceeding
     ``max_decompressed_size`` or ``max_values`` raises ``BtoonError`` with code
@@ -143,7 +153,9 @@ def decode(
         auto_decompress: if False, compressed input is rejected instead of decompressed.
         hmac_key: require and verify an HMAC-SHA256 signature made with this key. ``None``
             means no key; an empty key raises ``BtoonTypeError``.
-        timestamps: ``"datetime"`` (microsecond precision) or ``"object"`` (:class:`Timestamp`).
+        timestamps: ``"datetime"`` (microsecond precision) or ``"object"``, which keeps every
+            value exactly: :class:`Timestamp` for timestamps, :class:`Date` for dates and
+            :class:`DateTime` for datetimes, so they re-encode to the same bytes.
         vectors: how float vectors are returned.
         decompress: deprecated alias of ``auto_decompress`` (0.0.x API).
     """
@@ -155,21 +167,26 @@ def decode(
             stacklevel=2,
         )
         auto_decompress = decompress or auto_decompress
+    # Positional: pybind11's keyword matching crashes when an allocation fails.
     return _btoon.decode(
         data,
-        strict=strict,
-        max_depth=_limit("max_depth", max_depth, _MAX_DEPTH_LIMIT),
-        max_decompressed_size=_limit("max_decompressed_size", max_decompressed_size),
-        max_values=_limit("max_values", max_values),
-        auto_decompress=auto_decompress,
-        hmac_key=hmac_key,
-        timestamps=timestamps,
-        vectors=vectors,
+        bool(strict),
+        _limit("max_depth", max_depth, _MAX_DEPTH_LIMIT),
+        _limit("max_decompressed_size", max_decompressed_size),
+        _limit("max_values", max_values),
+        bool(auto_decompress),
+        hmac_key,
+        timestamps,
+        vectors,
     )
 
 
 def compression_available(algorithm: Compression) -> bool:
-    """Returns True if this build supports ``algorithm`` (``"zlib"`` always is)."""
+    """Returns True if this build supports ``algorithm``.
+
+    ``"zlib"`` is always available, and so is ``"auto"``, which picks among the available
+    algorithms.
+    """
     return _btoon.compression_available(algorithm)
 
 

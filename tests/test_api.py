@@ -2,15 +2,17 @@
 
 import array
 import datetime as dt
+import decimal
 import inspect
 import math
 import pickle
+import sys
 import threading
 
 import pytest
 
 import btoon
-from btoon import BtoonError, BtoonTypeError, ExtType, Timestamp
+from btoon import BtoonError, BtoonTypeError, Date, DateTime, ExtType, Timestamp
 
 UTC = dt.timezone.utc
 
@@ -287,8 +289,8 @@ def test_version_info():
     # __version__ must match the installed distribution (pyproject.toml).
     assert btoon.__version__ == version("btoon")
     assert btoon.version() == btoon.__version__
-    assert btoon.SPEC_VERSION == "0.2"
-    assert btoon.CORE_VERSION == "0.2.0"
+    assert btoon.SPEC_VERSION == "0.3"
+    assert btoon.CORE_VERSION == "0.3.0"
 
 
 def test_utcoffset_must_return_a_timedelta_under_a_day():
@@ -323,8 +325,8 @@ def test_utcoffset_must_return_a_timedelta_under_a_day():
 
 # --- spec 0.2: resource limits and stricter rules --------------------------------------------
 
-def nested(depth):
-    v = None
+def nested(depth, leaf=None):
+    v = leaf
     for _ in range(depth):
         v = [v]
     return v
@@ -504,3 +506,215 @@ def test_non_strict_mode_still_requires_utf8_keys():
             btoon.decode(bytes.fromhex(hexdata), strict=False)
         assert exc.value.code == "invalid_utf8"
     assert btoon.decode(bytes.fromhex("a1ff"), strict=False) == "\udcff"  # string values may still be lenient
+
+
+# --- review 2026-11-13: the remaining findings ------------------------------------------------
+
+def test_numpy_float_arrays_are_vectors_whatever_their_layout():
+    # Strided, reversed, big-endian and misaligned 1-D arrays used to become float64 lists.
+    np = pytest.importorskip("numpy")
+    a = np.arange(6, dtype=np.float32)
+
+    def f32(*xs):
+        return btoon.encode(array.array("f", xs))
+
+    assert btoon.encode(a) == f32(0, 1, 2, 3, 4, 5)
+    assert btoon.encode(a[::2]) == f32(0, 2, 4)
+    assert btoon.encode(a[::-2]) == f32(5, 3, 1)
+    assert btoon.encode(a.astype(">f4")) == f32(0, 1, 2, 3, 4, 5)
+    assert btoon.encode(a.astype(">f8")[::-1]) == btoon.encode(array.array("d", [5, 4, 3, 2, 1, 0]))
+    assert btoon.encode(a.reshape(2, 3)[:, 1]) == f32(1, 4)  # a strided column
+    misaligned = np.frombuffer(b"\x00" + a.tobytes(), dtype=np.float32, offset=1)
+    assert not misaligned.flags.aligned
+    assert btoon.encode(misaligned) == f32(0, 1, 2, 3, 4, 5)
+    assert btoon.encode(np.array([], dtype=">f8")) == bytes.fromhex("c700fa")
+    out = btoon.decode(btoon.encode(a[::-1]), vectors="numpy")
+    assert out.dtype == np.float32 and out.tolist() == [5, 4, 3, 2, 1, 0]
+    # Other arrays still go through tolist(): N-D, integers, float16, 0-d.
+    assert btoon.decode(btoon.encode(a.reshape(2, 3))) == [[0, 1, 2], [3, 4, 5]]
+    assert btoon.encode(np.arange(3)) == btoon.encode([0, 1, 2])
+    assert btoon.encode(a[:2].astype(np.float16)) == btoon.encode([0.0, 1.0])
+    assert btoon.encode(np.array(1.5, dtype=np.float32)) == btoon.encode(1.5)
+
+
+def test_numpy_element_type_comes_from_the_buffer():
+    # An ndarray subclass can override .dtype; the encoder reads the buffer's own format.
+    np = pytest.importorskip("numpy")
+
+    class Liar(np.ndarray):
+        @property
+        def dtype(self):
+            return np.dtype(np.float64)
+
+    assert btoon.encode(np.arange(3, dtype=np.int8).view(Liar)) == btoon.encode([0, 1, 2])
+
+
+def test_numpy_masked_arrays_are_refused():
+    # Review 2026-11-13: a 1-D float masked array was written with its masked values.
+    np = pytest.importorskip("numpy")
+    m = np.ma.masked_array(np.array([1.0, 2.0, 3.0], dtype=np.float32), mask=[0, 1, 0])
+    for value in (m, [1, m], {"m": m}, m.reshape(1, 3), np.ma.masked_array([1, 2], mask=[1, 0])):
+        with pytest.raises(BtoonTypeError, match="masked") as exc:
+            btoon.encode(value)
+        assert exc.value.code == "invalid_argument"
+    # default() decides, like for any unsupported object.
+    assert btoon.decode(btoon.encode(m, default=lambda a: a.tolist())) == [1.0, None, 3.0]
+    filled = btoon.decode(btoon.encode(m, default=lambda a: a.filled(np.nan)), vectors="list")
+    assert filled[0] == 1.0 and math.isnan(filled[1]) and filled[2] == 3.0
+
+
+def test_default_replacements_take_the_objects_depth():
+    # Review 2026-11-13: a value returned by default() cost an extra nesting level.
+    class O:
+        pass
+
+    assert btoon.encode(nested(5, O()), max_depth=5, default=lambda o: 1) == btoon.encode(nested(5, 1), max_depth=5)
+    assert btoon.encode(nested(4, O()), max_depth=5, default=lambda o: []) == btoon.encode(nested(4, []), max_depth=5)
+    assert btoon.encode(O(), max_depth=0, default=lambda o: 1) == b"\x01"
+    with pytest.raises(BtoonError) as exc:  # a container in its place still counts
+        btoon.encode(nested(5, O()), max_depth=5, default=lambda o: [])
+    assert exc.value.code == "max_depth"
+    # A default() that returns another object it must handle: a chain, at the same depth.
+    class Step:
+        def __init__(self, n):
+            self.n = n
+
+    def step(s):
+        return Step(s.n - 1) if s.n else "done"
+
+    assert btoon.encode(nested(9, Step(5)), max_depth=10, default=step) == btoon.encode(nested(9, "done"), max_depth=10)
+    with pytest.raises(BtoonError) as exc:  # one that never resolves still terminates
+        btoon.encode(O(), default=lambda o: o)
+    assert exc.value.code == "max_depth"
+
+
+def test_default_dicts_make_tables_like_dicts_do():
+    # The canonical encoding of a list of maps doesn't depend on how the maps were made:
+    # objects default() turns into dicts qualify for the tabular layout (spec §5.6.2).
+    class P:
+        def __init__(self, i):
+            self.i = i
+
+    rows = [{"id": i, "name": f"n{i}"} for i in range(10)]
+    calls = []
+
+    def default(p):
+        calls.append(p.i)
+        return {"id": p.i, "name": f"n{p.i}"}
+
+    objects = [P(i) for i in range(10)]
+    assert btoon.encode(objects, default=default) == btoon.encode(rows)
+    assert calls == list(range(10))  # once per object
+    mixed = [rows[0], P(1), rows[2], {"other": 1}, P(4)]
+    calls.clear()
+    assert btoon.encode(mixed, default=default) == btoon.encode([rows[0], rows[1], rows[2], {"other": 1}, rows[4]])
+    assert calls == [1, 4]
+
+
+def test_keys_that_are_the_same_string_are_refused():
+    # Review 2026-11-13: a str subclass with its own __hash__/__eq__ let a dict hold two keys
+    # with the same text, which encoded as a map every strict decoder rejects.
+    class K(str):
+        __hash__ = object.__hash__
+
+        def __eq__(self, other):
+            return self is other
+
+    for value in ({K("a"): 1, K("a"): 2}, {"a": 1, K("a"): 2}, [{K("a"): i, K("a"): -i} for i in range(20)]):
+        with pytest.raises(BtoonError, match="same string") as exc:
+            btoon.encode(value)
+        assert exc.value.code == "invalid_argument"
+
+
+def test_table_keys_compare_as_strings_not_by_hash():
+    # Core compares keys by their bytes. A row whose key hashes differently from an equal
+    # str used to fail the dict lookup, and the list wasn't written as a table.
+    class H(str):
+        __hash__ = object.__hash__
+
+    rows = [{"name": i, "id": i} for i in range(20)]
+    odd = [dict(r) for r in rows]
+    odd[7] = {H("name"): 7, H("id"): 7}
+    assert btoon.encode(odd) == btoon.encode(rows)
+
+
+def test_hidden_numpy_is_not_an_error(monkeypatch):
+    # Review 2026-11-13: sys.modules["numpy"] = None (how tests hide numpy) made every
+    # unsupported object raise AttributeError, even with default=.
+    monkeypatch.setitem(sys.modules, "numpy", None)
+    with pytest.raises(BtoonTypeError):
+        btoon.encode(decimal.Decimal("1.5"))
+    assert btoon.encode(decimal.Decimal("1.5"), default=str) == btoon.encode("1.5")
+    assert btoon.encode([1.5]) == btoon.encode([1.5])
+
+
+def test_invalid_values_raise_btoon_or_type_errors():
+    # Review 2026-11-13: these raised pybind11's RuntimeError or a bare TypeError.
+    with pytest.raises(TypeError):
+        Timestamp(1.5)  # caught when constructed, not as a RuntimeError when encoded
+    with pytest.raises(TypeError):
+        Timestamp(1, 1.5)
+    class Two(__import__("enum").IntEnum):
+        TWO = 2
+
+    assert type(Timestamp(Two.TWO).seconds) is int  # integers are normalized to int
+    cases = [
+        lambda: btoon.encode(ExtType._make([1, "abc"])),
+        lambda: btoon.encode(1, compression=5),
+        lambda: btoon.encode(object(), default=5),
+        lambda: btoon.decode(b"\x01", timestamps=1),
+        lambda: btoon.decode(b"\x01", vectors=None),
+        lambda: btoon.compression_available(None),
+    ]
+    for call in cases:
+        with pytest.raises(BtoonTypeError) as exc:
+            call()
+        assert exc.value.code == "invalid_argument"
+
+
+def test_compression_available_auto():
+    # Review 2026-11-13: "auto" works (it picks among the built-in algorithms) but was
+    # reported as unavailable.
+    assert btoon.compression_available("auto") is True
+    assert btoon.compression_available("zlib") is True
+    assert btoon.decode(btoon.encode(ROWS, compress=True, compression="auto")) == ROWS
+
+
+def test_memoryviews_encode_like_bytes():
+    # A non-contiguous view raised BufferError; it encodes as bytes(view), like a contiguous one.
+    view = memoryview(b"abcdef")[::2]
+    assert btoon.encode(view) == btoon.encode(b"ace")
+    grid = memoryview(bytearray(b"abcdef")).cast("B", (2, 3))
+    assert btoon.encode(grid) == btoon.encode(b"abcdef")
+    data = btoon.encode([1, "two"])  # decode takes the same views
+    interleaved = bytes(x for byte in data for x in (byte, 0))
+    assert btoon.decode(memoryview(interleaved)[::2]) == [1, "two"]
+
+
+def test_flags_take_any_truth_value():
+    assert btoon.encode(ROWS, auto_tabular=0) == btoon.encode(ROWS, auto_tabular=False)
+    assert btoon.decode(b"\x01\x02", strict=0) == 1
+
+
+def test_native_module_takes_positional_arguments():
+    # btoon.encode/decode call it positionally (see test_allocation_failures_raise_memory_error).
+    assert btoon._btoon.encode([1], False, "zlib", True, 128, None, None) == btoon.encode([1])
+    assert btoon._btoon.decode(b"\x91\x01", True, 128, 1 << 20, 100, True, None, "object", "array") == [1]
+
+
+def test_msgpack_reads_btoon_with_an_ext_hook():
+    # What the README promises about msgpack-python, and no more: canonical MessagePack
+    # reads directly; BTOON's own extensions need ext_hook= (msgpack's default ExtType
+    # refuses negative codes); a Timestamp with an offset can't be read at all.
+    msgpack = pytest.importorskip("msgpack")
+    plain = {"a": [1, 2.5, None, True, "x", b"y"], "t": Timestamp(1704067200, 500)}
+    assert msgpack.unpackb(btoon.encode(plain, auto_tabular=False)) == {**plain, "t": msgpack.Timestamp(1704067200, 500)}
+    doc = {"big": 2**70, "day": Date(1700000000123), "at": DateTime(5), "vec": array.array("f", [1.0])}
+    data = btoon.encode(doc, auto_tabular=False)
+    with pytest.raises(ValueError):
+        msgpack.unpackb(data)
+    raw = msgpack.unpackb(data, ext_hook=lambda code, payload: (code, payload))
+    assert raw["big"] == (-4, (2**70).to_bytes(9, "big")) and raw["day"][0] == -2 and raw["at"][0] == -3
+    assert raw["vec"] == (-5, b"\x00\x00\x80\x3f")
+    with pytest.raises(ValueError):
+        msgpack.unpackb(btoon.encode(Timestamp(0, 0, 60)))

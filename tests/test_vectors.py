@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 import btoon
-from btoon import ExtType, Timestamp
+from btoon import Date, DateTime, ExtType, Timestamp
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -75,11 +75,9 @@ def from_typed(t):
     if kind == "timestamp":
         return Timestamp(int(x["seconds"]), x["nanoseconds"], x.get("offset_minutes"))
     if kind == "date":
-        s, r = divmod(int(x), 1000)
-        return Timestamp(s, r * 1_000_000)
+        return Date(int(x))
     if kind == "datetime":
-        s, r = divmod(int(x), 1_000_000_000)
-        return Timestamp(s, r)
+        return DateTime(int(x))
     if kind == "float32_vector":
         return float_vector(x, "f")
     if kind == "float64_vector":
@@ -182,14 +180,27 @@ def test_decode(valid):
 
 
 def test_canonical_encode(valid):
+    # spec §10 (0.3): every canonical vector re-encodes, date and datetime included.
     if not valid["canonical"]:
         pytest.skip("decode-only vector")
-    if contains(valid["value"], {"date", "datetime"}):
-        # They decode to datetime, which encodes as a timestamp (-1), and spec §5.7 forbids
-        # writing their ids as a raw ExtType.
-        pytest.skip("no Python value encodes to the date/datetime extensions")
     value = from_typed(valid["value"])
     assert btoon.encode(value, **encode_options(valid)).hex() == valid["hex"]
+
+
+def test_decode_then_encode_is_lossless(valid):
+    # timestamps="object" preserves every BTOON type (spec §10), so a canonical document
+    # survives decode + encode byte for byte.
+    if not valid["canonical"]:
+        pytest.skip("decode-only vector")
+    data = bytes.fromhex(valid["hex"])
+    value = btoon.decode(data, timestamps="object", **decode_options(valid))
+    assert btoon.encode(value, **encode_options(valid)) == data
+
+
+def test_harness_covers_the_typed_instants():
+    # The 0.3 vectors that need btoon.Date/btoon.DateTime to re-encode are all canonical.
+    ids = {v["id"] for v in VECTORS["vectors"] if v.get("canonical") and contains(v["value"], {"date", "datetime"})}
+    assert {"date/max", "date/min", "datetime/max", "datetime/min", "tabular/date-and-datetime-columns"} <= ids
 
 
 def test_rejects(invalid):

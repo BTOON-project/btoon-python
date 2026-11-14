@@ -1,5 +1,94 @@
 # Changelog
 
+## 0.3.0 (2026-11-14)
+
+BTOON spec 0.3, on btoon-core 0.3.0: `btoon.SPEC_VERSION` is `"0.3"`. The wire format is
+unchanged. Spec 0.3 requires every BTOON type to be writable, so this release adds typed
+date and datetime values. It also adds free-threaded wheels and fixes the remaining
+findings of the 2026-11-13 review. Each behavior change is marked.
+
+- **New: `btoon.Date` and `btoon.DateTime`** for BTOON's date (extension -2, milliseconds
+  since the epoch) and datetime (-3, nanoseconds) types: `btoon.Date(1700000000123)`,
+  `btoon.DateTime(1700000000123456789)`. They encode as those extensions, also as table
+  cells, so a document with dates survives decode and re-encode byte for byte.
+  - They are frozen dataclasses and subclasses of `Timestamp`: `isinstance()` checks and
+    `seconds`/`nanoseconds` keep working (`offset_minutes` is always None). They compare
+    unequal to a `Timestamp`, because they are different BTOON values.
+  - `epoch_milliseconds` / `epoch_nanoseconds` hold the wire value; a value outside 64 bits
+    raises `ValueError`. `from_datetime()` (naive means UTC; `Date` rounds down to the
+    millisecond), `from_timestamp()` (refuses a `Timestamp` with an offset) and the
+    inherited `to_datetime()` convert. `dataclasses.replace()` and `copy.replace()` take
+    the epoch value. They pickle, hash and print as `btoon.Date(1700000000123)`.
+  - `ExtType(-2, ...)` and `ExtType(-3, ...)` are still refused; the error now names the
+    type to use.
+- **Behavior change:** `decode(..., timestamps="object")` returns `btoon.Date` and
+  `btoon.DateTime` for dates and datetimes. It used to return a plain `Timestamp`, which
+  re-encoded as a timestamp. The default `timestamps="datetime"` is unchanged, except that
+  a date or datetime outside `datetime`'s years 1–9999 now falls back to `btoon.Date` or
+  `btoon.DateTime` instead of `Timestamp`.
+- **Free-threaded CPython:** wheels for 3.14t and 3.15t, and the extension declares that it
+  doesn't need the GIL, so `import btoon` leaves it off. Encoding copies each list and
+  dict (the dict under its lock) before it can run Python code or let other threads in,
+  so every container is written from one consistent snapshot and never through a
+  reference another thread can free. Without the GIL, 0.2 crashed when another thread
+  replaced a table cell during encoding. CI runs the tests on 3.14t with `PYTHON_GIL=0`.
+- **Lower peak memory when decoding** (review 2026-11-13). The parsed document used to stay
+  whole until every Python object existed, so the peak was both. Now each part is freed
+  once it is converted. How much that lowers the peak depends on whether the C allocator
+  can reuse or return the freed memory. Peak RSS growth while decoding, before → after, on
+  Linux (glibc): 24 × 4 MiB blobs 192 → 100 MiB, 100,000 1 KB strings 205 → 107 MiB.
+  Documents made of many small values, such as a 150,000-row table or 300,000 small dicts,
+  stay at 190 and 193 MiB: glibc keeps small freed blocks for its own reuse. On macOS the
+  peak memory footprint drops for those too: the table 174 → 129 MiB, the strings
+  340 → 292 MiB.
+- **numpy** (review 2026-11-13):
+  - **Behavior change:** every 1-D float32/float64 array is a float vector, whatever its
+    strides, alignment or byte order. Strided, reversed and big-endian arrays used to be
+    written as float64 lists. The element type now comes from the array's buffer, which
+    an `ndarray` subclass can't misreport the way it can override `.dtype`.
+  - **Behavior change:** masked arrays raise `BtoonTypeError` unless `default=` handles
+    them. A 1-D float masked array used to be written with its masked values.
+- **Behavior change:** `default()`'s return value takes the object's place at the same
+  depth; it used to cost a nesting level. A `default()` that keeps returning objects it
+  must handle again fails with `max_depth` after `max_depth` + 1 calls in a row.
+- **Behavior change:** a list whose elements `default()` turns into dicts is written as a
+  table when a list of those dicts would be, as spec §5.6.2 requires. To decide, `default()`
+  is called for a list's elements before they are encoded, so it can run earlier than it
+  used to; it is still called once per object. Table keys are compared as strings, not by
+  hash, as core does.
+- **Behavior change:** a dict with two keys that are the same string (possible with a
+  `str` subclass that overrides `__eq__` or `__hash__`) raises `BtoonError`
+  (`invalid_argument`). It used to produce a map with duplicate keys, which strict
+  decoders reject.
+- **Behavior change:** `Timestamp` fields must be integers. `Timestamp(1.5)` raises
+  `TypeError` when constructed; it used to fail only when encoded, with pybind11's
+  `RuntimeError`. Integer-like values such as numpy integers are converted to `int`.
+- **Fixed** (review 2026-11-13):
+  - An allocation failure could segfault: in pybind11's keyword matching, which every
+    call went through, and in unchecked object creation. `btoon.encode`/`decode` now call
+    the native module positionally, and every allocation is checked: it raises
+    `MemoryError`. Others raised `RuntimeError`.
+  - If copying a `bytearray`/`memoryview` input failed, its buffer export leaked and the
+    `bytearray` could no longer be resized.
+  - Decoding a timestamp with seconds near ±2**63 and an offset overflowed a signed integer
+    (undefined behavior).
+  - Wrong exception types: hiding numpy with `sys.modules["numpy"] = None` made every
+    unsupported object raise `AttributeError`, even with `default=`. Invalid
+    `compression`, `timestamps`, `vectors` or `default` arguments, and an `ExtType` whose
+    data isn't bytes, now raise `BtoonTypeError` (`invalid_argument`).
+  - `compression_available("auto")` returned False; it is True.
+  - A non-contiguous `memoryview` raised `BufferError`. It encodes as `bytes(view)`, and
+    `decode` accepts one.
+  - The sdist couldn't run its own tests because the conformance vectors were left out.
+    They are included, and CI now builds and tests from the unpacked sdist alone.
+  - The README overstated what msgpack-python reads: it needs an `ext_hook` for BTOON's
+    extensions, and can't read a timestamp with an offset.
+- **Build:** needs pybind11 3.0 or later.
+- **Tests:** the conformance harness re-encodes every canonical vector, dates and
+  datetimes included, and checks that `decode(..., timestamps="object")` followed by
+  `encode` gives back the same bytes. New tests cover threads (`test_threads.py`), the
+  typed values (`test_types.py`) and each review finding.
+
 ## 0.2.1 (2026-11-14)
 
 - **Wheels for CPython 3.15.** 0.2.0 shipped wheels for 3.10–3.14 only, so on 3.15
