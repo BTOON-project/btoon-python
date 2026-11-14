@@ -282,9 +282,13 @@ def test_msgpack_reads_btoon_and_vice_versa():
 
 
 def test_version_info():
-    assert btoon.__version__ == "0.2.0"
+    from importlib.metadata import version
+
+    # __version__ must match the installed distribution (pyproject.toml).
+    assert btoon.__version__ == version("btoon")
+    assert btoon.version() == btoon.__version__
     assert btoon.SPEC_VERSION == "0.2"
-    assert btoon.version() == "0.2.0"
+    assert btoon.CORE_VERSION == "0.2.0"
 
 
 def test_utcoffset_must_return_a_timedelta_under_a_day():

@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "btoon"
-version = "0.2.0"
+version = "0.2.1"
 description = "BTOON: compact binary serialization — MessagePack plus columnar tables, timestamps, big ints and vectors"
 readme = "README.md"
 license = { text = "MIT" }
@@ -25,6 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
@@ -59,8 +60,12 @@ testpaths = ["tests"]
 addopts = "-ra --import-mode=importlib"
 
 [tool.cibuildwheel]
-build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
-skip = "*-musllinux_i686 *-win32 *-manylinux_i686"
+# Every CPython the pinned cibuildwheel supports, from requires-python (3.10) up, so a
+# new CPython gets wheels when the pin is bumped. 0.2.0 listed the versions by hand and
+# shipped without 3.15 wheels. Free-threaded builds (cp3XXt) are skipped: the extension
+# doesn't declare free-threading support yet.
+build = "cp3*"
+skip = "cp3??t-* *-musllinux_i686 *-win32 *-manylinux_i686"
 test-requires = ["pytest>=8", "msgpack>=1.0"]
 test-command = "pytest {project}/tests -q"
 build-verbosity = 1
